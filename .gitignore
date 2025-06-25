@@ -1,0 +1,447 @@
+# 🎯 AutoTicketClassifier - .gitignore
+# Python AI/ML Projesi için kapsamlı gitignore
+
+# =============================================================================
+# PYTHON
+# =============================================================================
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+#  Usually these files are written by a python script from a template
+#  before PyInstaller builds the exe, so as to inject date/other infos into it.
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# Translations
+*.mo
+*.pot
+
+# Django stuff:
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+
+# Flask stuff:
+instance/
+.webassets-cache
+
+# Scrapy stuff:
+.scrapy
+
+# Sphinx documentation
+docs/_build/
+
+# PyBuilder
+target/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Notebook dosyaları (büyük analysis dosyaları)
+notebooks/AutoTicket_Classifier_Analysis.ipynb
+notebooks/*_Analysis.ipynb
+notebooks/*_analysis.ipynb
+notebooks/experimental_*.ipynb
+notebooks/research_*.ipynb
+
+# IPython
+profile_default/
+ipython_config.py
+
+# pyenv
+.python-version
+
+# pipenv
+#   According to pypa/pipenv#598, it is recommended to include Pipfile.lock in version control.
+#   However, in case of collaboration, if having platform-specific dependencies or dependencies
+#   having no cross-platform support, pipenv may install dependencies that don't work, or not
+#   install all needed dependencies.
+#Pipfile.lock
+
+# PEP 582; used by e.g. github.com/David-OConnor/pyflow
+__pypackages__/
+
+# Celery stuff
+celerybeat-schedule
+celerybeat.pid
+
+# SageMath parsed files
+*.sage.py
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Spyder project settings
+.spyderproject
+.spyproject
+
+# Rope project settings
+.ropeproject
+
+# mkdocs documentation
+/site
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# =============================================================================
+# MACHINE LEARNING & DATA SCIENCE
+# =============================================================================
+
+# Model files (eğitilmiş modeller - büyük olabilir)
+*.pkl
+*.pickle
+*.joblib
+*.h5
+*.hdf5
+*.ckpt
+*.pth
+*.pt
+*.safetensors
+
+# Model sonuçları ve cache
+*.model
+*.weights
+model_cache/
+checkpoint/
+checkpoints/
+
+# TensorBoard logs
+logs/
+tensorboard_logs/
+tb_logs/
+
+# Weights & Biases
+wandb/
+
+# MLflow
+mlruns/
+mlflow_logs/
+
+# Data files (büyük veri dosyaları)
+*.csv
+*.tsv
+*.json
+*.jsonl
+*.parquet
+*.feather
+*.h5
+*.hdf5
+*.npy
+*.npz
+
+# Datasets (genellikle büyük)
+data/raw/
+data/processed/
+data/external/
+datasets/
+raw_data/
+
+# Özel olarak küçük örnek verileri hariç tut
+!data/sample/
+!data/examples/
+!data/demo/
+
+# Model outputs
+outputs/
+results/
+predictions/
+experiments/
+
+# Feature store
+features/
+feature_store/
+
+# =============================================================================
+# PROJECT SPECIFIC
+# =============================================================================
+
+# Eğitilmiş model dosyaları (bu projede)
+models/trained/*.pkl
+models/trained/*.joblib
+models/trained/*.h5
+models/trained/*.pth
+models/trained/*.pt
+models/trained/*.model
+
+# Model metadata hariç tut (küçük dosyalar)
+!models/trained/*.json
+!models/trained/*.txt
+!models/trained/*.yaml
+!models/trained/*.yml
+
+# Temporary files
+temp/
+tmp/
+temporary/
+
+# Generated synthetic data
+data/generated/
+synthetic_data/
+
+# User-specific config files
+config/local_*
+config/personal_*
+.env.local
+
+# API keys ve credentials
+api_keys.txt
+credentials.json
+secrets.py
+.secrets
+
+# Performance benchmarks
+benchmarks/
+profiling/
+
+# =============================================================================
+# DEVELOPMENT TOOLS
+# =============================================================================
+
+# IDE - VS Code
+.vscode/
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# IDE - PyCharm
+.idea/
+*.iws
+*.iml
+*.ipr
+
+# IDE - Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# IDE - Atom
+.atom/
+
+# =============================================================================
+# OPERATING SYSTEM
+# =============================================================================
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+*.stackdump
+[Dd]esktop.ini
+$RECYCLE.BIN/
+*.cab
+*.msi
+*.msix
+*.msm
+*.msp
+*.lnk
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+
+# Linux
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+.nfs*
+
+# =============================================================================
+# WEB & SERVER
+# =============================================================================
+
+# Streamlit
+.streamlit/
+
+# Flask
+instance/
+.webassets-cache
+
+# FastAPI
+.fastapi/
+
+# uvicorn
+*.pid
+
+# =============================================================================
+# DATABASES
+# =============================================================================
+
+# SQLite
+*.db
+*.sqlite
+*.sqlite3
+
+# PostgreSQL
+*.dump
+
+# =============================================================================
+# DOCUMENTATION
+# =============================================================================
+
+# Generated docs
+docs/build/
+docs/_build/
+
+# LaTeX
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.synctex.gz
+*.toc
+
+# =============================================================================
+# CUSTOM EXCLUSIONS
+# =============================================================================
+
+# Large test files
+test_large_dataset.csv
+benchmark_data.json
+
+# Personal notes
+NOTES.md
+TODO_personal.md
+scratch.py
+test_script.py
+
+# Tutorial ve döküman dosyaları (çok uzun olabilir)
+docs/naive_bayes_tutorial.md
+docs/naive_bayes_detayli_anlatim.md
+docs/*_tutorial.md
+docs/*_anlatim.md
+
+# Example ve practice dosyaları
+examples/naive_bayes_matematik_practice.py
+examples/debugging_example.py
+examples/practice_*.py
+examples/test_*.py
+
+# Backup files
+*.backup
+*.bak
+*~
+
+# =============================================================================
+# INCLUSIONS (Force include important files)
+# =============================================================================
+
+# Always include these important files
+!requirements.txt
+!README.md
+!.gitignore
+!LICENSE
+!setup.py
+!pyproject.toml
+
+# Always include configuration templates
+!config/template_*
+!config/example_*
+
+# Always include small demo data
+!data/demo/*
+!data/sample/*
+!data/examples/*
+
+# Always include documentation
+!docs/*.md
+!docs/*.rst
+
+# =============================================================================
+# COMMENTS & NOTES
+# =============================================================================
+
+# Bu .gitignore dosyası şunları kapsar:
+# ✅ Python bytecode ve cache dosyaları
+# ✅ Virtual environment klasörleri  
+# ✅ IDE-specific dosyalar
+# ✅ İşletim sistemi temp dosyaları
+# ✅ ML model dosyaları (büyük olanlar)
+# ✅ Büyük veri dosyaları
+# ✅ API anahtarları ve credentials
+# ✅ Log ve temporary dosyalar
+# ✅ Önemli config dosyalarını dahil etme
+
+# Proje-specific notlar:
+# - models/trained/ altındaki .pkl, .joblib dosyaları ignore edilir
+# - Küçük .json metadata dosyaları dahil edilir
+# - Sample/demo data dahil edilir
+# - Personal notes ignore edilir
