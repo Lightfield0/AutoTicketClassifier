@@ -61,6 +61,10 @@ class LogisticRegressionClassifier:
         
         return training_time
     
+    def fit(self, X, y):
+        """Sklearn uyumluluğu için fit metodu"""
+        return self.train(X, y)
+    
     def predict(self, X_test):
         """Tahmin yap"""
         if not self.is_trained:

@@ -445,3 +445,19 @@ examples/test_*.py
 # - Küçük .json metadata dosyaları dahil edilir
 # - Sample/demo data dahil edilir
 # - Personal notes ignore edilir
+
+# =============================================================================
+# MONITORING & OUTPUTS
+# =============================================================================
+
+# Monitoring outputs klasörü (ama klasör yapısını koru)
+monitoring_outputs/
+!monitoring_outputs/.gitkeep
+
+# Evaluation results
+evaluation_results/
+!evaluation_results/.gitkeep
+
+# Temporary monitoring files
+monitoring_report_*.txt
+drift_dashboard.html

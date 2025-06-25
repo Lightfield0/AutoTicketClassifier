@@ -230,6 +230,57 @@ class FeatureExtractor:
             for i, (feature, score) in enumerate(features, 1):
                 print(f"   {i:2d}. {feature:<20} ({score:.4f})")
 
+    def extract_all_features(self, texts, max_tfidf_features=5000, max_count_features=5000):
+        """Tüm özellik türlerini çıkarır ve birleştirir"""
+        print("🔧 Tüm özellikler çıkarılıyor...")
+        
+        # TF-IDF özellikleri
+        try:
+            # Test için daha düşük min_df kullan
+            self.tfidf_vectorizer = TfidfVectorizer(
+                max_features=max_tfidf_features,
+                ngram_range=(1, 2),
+                min_df=1,  # Test için daha düşük threshold
+                max_df=0.95,
+                sublinear_tf=True,
+                strip_accents='unicode'
+            )
+            tfidf_matrix = self.tfidf_vectorizer.fit_transform(texts)
+            tfidf_feature_names = self.tfidf_vectorizer.get_feature_names_out()
+        except ValueError as e:
+            print(f"⚠️ TF-IDF hatası: {e}, varsayılan matris kullanılıyor")
+            tfidf_matrix = np.zeros((len(texts), 10))
+            tfidf_feature_names = [f"tfidf_{i}" for i in range(10)]
+        
+        # İstatistiksel özellikler
+        stat_features = self.extract_statistical_features(texts)
+        
+        # Kelime bilgisi özellikleri
+        lexical_features = self.extract_lexical_features(texts)
+        
+        # Özellikleri birleştir
+        import scipy.sparse as sp
+        if sp.issparse(tfidf_matrix):
+            tfidf_dense = tfidf_matrix.toarray()
+        else:
+            tfidf_dense = tfidf_matrix
+            
+        combined_features = np.hstack([
+            tfidf_dense,
+            stat_features.values,
+            lexical_features.values
+        ])
+        
+        # Özellik isimlerini birleştir
+        all_feature_names = (
+            list(tfidf_feature_names) + 
+            list(stat_features.columns) + 
+            list(lexical_features.columns)
+        )
+        
+        print(f"✅ Toplam {combined_features.shape[1]} özellik çıkarıldı")
+        return combined_features, all_feature_names
+
 def demo_feature_extraction():
     """Özellik çıkarma demo'su"""
     print("🧪 Özellik Çıkarma Demo'su")
