@@ -333,16 +333,22 @@ class ModelEvaluator:
         
         return drift_results
     
-    def compare_models(self, models_results):
+    def compare_models(self, models_results=None):
         """Birden fazla modeli karşılaştır"""
         print("\n🏆 MODEL KARŞILAŞTIRMASI")
         print("=" * 50)
+        
+        # Eğer models_results verilmemişse self.results kullan
+        if models_results is None:
+            models_results = self.results
         
         # Metrik tablosu oluştur
         comparison_data = []
         
         for model_name, results in models_results.items():
+            # İki farklı format destekle
             if 'basic_metrics' in results:
+                # Comprehensive evaluation format
                 metrics = results['basic_metrics']
                 row = {
                     'Model': model_name,
@@ -357,8 +363,21 @@ class ModelEvaluator:
                     ov = results['overfitting_analysis']
                     row['Overfitting Gap'] = ov['overfitting_gap']
                     row['Is Overfitting'] = ov['is_overfitting']
-                
-                comparison_data.append(row)
+            else:
+                # Simple evaluation format
+                row = {
+                    'Model': model_name,
+                    'Accuracy': results.get('accuracy', 0),
+                    'Precision': results.get('precision', 0),
+                    'Recall': results.get('recall', 0),
+                    'F1-Score': results.get('f1_score', 0)
+                }
+            
+            comparison_data.append(row)
+        
+        if not comparison_data:
+            print("❌ Karşılaştırılacak model bulunamadı")
+            return None
         
         comparison_df = pd.DataFrame(comparison_data)
         
@@ -436,57 +455,57 @@ class ModelEvaluator:
             'average_accuracy': np.mean(accuracies),
             'model_count': len(self.results)
         }
+
+def demo_evaluation():
+    """Değerlendirme demo'su"""
+    print("🧪 Model Değerlendirme Demo'su")
+    print("=" * 50)
     
-    def demo_evaluation():
-        """Değerlendirme demo'su"""
-        print("🧪 Model Değerlendirme Demo'su")
-        print("=" * 50)
-        
-        # Örnek veri oluştur
-        np.random.seed(42)
-        n_samples = 1000
-        n_classes = 6
-        
-        y_true = np.random.randint(0, n_classes, n_samples)
-        
-        # Farklı performanslarda 3 model simülasyonu
-        # Model 1: İyi performans
-        y_pred1 = y_true.copy()
-        noise_indices = np.random.choice(n_samples, int(n_samples * 0.15), replace=False)
-        y_pred1[noise_indices] = np.random.randint(0, n_classes, len(noise_indices))
-        
-        # Model 2: Orta performans
-        y_pred2 = y_true.copy()
-        noise_indices = np.random.choice(n_samples, int(n_samples * 0.25), replace=False)
-        y_pred2[noise_indices] = np.random.randint(0, n_classes, len(noise_indices))
-        
-        # Model 3: Düşük performans
-        y_pred3 = y_true.copy()
-        noise_indices = np.random.choice(n_samples, int(n_samples * 0.4), replace=False)
-        y_pred3[noise_indices] = np.random.randint(0, n_classes, len(noise_indices))
-        
-        # Evaluator oluştur
-        evaluator = ModelEvaluator()
-        
-        # Modelleri değerlendir
-        class MockModel:
-            def __init__(self, predictions):
-                self.predictions = predictions
-            def predict(self, X):
-                return self.predictions
-        
-        X_dummy = np.zeros((n_samples, 10))  # Dummy features
-        
-        evaluator.evaluate_model(MockModel(y_pred1), X_dummy, y_true, model_name="BERT Classifier")
-        evaluator.evaluate_model(MockModel(y_pred2), X_dummy, y_true, model_name="Logistic Regression")
-        evaluator.evaluate_model(MockModel(y_pred3), X_dummy, y_true, model_name="Naive Bayes")
-        
-        # Karşılaştırma
-        class_names = ["Ödeme", "Rezervasyon", "Kullanıcı", "Şikayet", "Bilgi", "Teknik"]
-        comparison_df = evaluator.compare_models()
-        
-        # Özet rapor
-        evaluator.generate_summary_report(class_names)
+    # Örnek veri oluştur
+    np.random.seed(42)
+    n_samples = 1000
+    n_classes = 6
+    
+    y_true = np.random.randint(0, n_classes, n_samples)
+    
+    # Farklı performanslarda 3 model simülasyonu
+    # Model 1: İyi performans
+    y_pred1 = y_true.copy()
+    noise_indices = np.random.choice(n_samples, int(n_samples * 0.15), replace=False)
+    y_pred1[noise_indices] = np.random.randint(0, n_classes, len(noise_indices))
+    
+    # Model 2: Orta performans
+    y_pred2 = y_true.copy()
+    noise_indices = np.random.choice(n_samples, int(n_samples * 0.25), replace=False)
+    y_pred2[noise_indices] = np.random.randint(0, n_classes, len(noise_indices))
+    
+    # Model 3: Düşük performans
+    y_pred3 = y_true.copy()
+    noise_indices = np.random.choice(n_samples, int(n_samples * 0.4), replace=False)
+    y_pred3[noise_indices] = np.random.randint(0, n_classes, len(noise_indices))
+    
+    # Evaluator oluştur
+    evaluator = ModelEvaluator()
+    
+    # Modelleri değerlendir
+    class MockModel:
+        def __init__(self, predictions):
+            self.predictions = predictions
+        def predict(self, X):
+            return self.predictions
+    
+    X_dummy = np.zeros((n_samples, 10))  # Dummy features
+    
+    evaluator.evaluate_model(MockModel(y_pred1), X_dummy, y_true, model_name="BERT Classifier")
+    evaluator.evaluate_model(MockModel(y_pred2), X_dummy, y_true, model_name="Logistic Regression")
+    evaluator.evaluate_model(MockModel(y_pred3), X_dummy, y_true, model_name="Naive Bayes")
+    
+    # Karşılaştırma
+    class_names = ["Ödeme", "Rezervasyon", "Kullanıcı", "Şikayet", "Bilgi", "Teknik"]
+    comparison_df = evaluator.compare_models()
+    
+    # Özet rapor
+    evaluator.generate_summary_report(class_names)
 
 if __name__ == "__main__":
     demo_evaluation()
