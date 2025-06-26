@@ -23,7 +23,7 @@ class FeatureExtractor:
         self.tfidf_vectorizer = TfidfVectorizer(
             max_features=max_features,
             ngram_range=ngram_range,
-            min_df=2,  # En az 2 dokümanda geçmeli
+            min_df=1,  # En az 1 dokümanda geçmeli (küçük datasets için)
             max_df=0.95,  # %95'ten fazla dokümanda geçmesin
             sublinear_tf=True,
             strip_accents='unicode'

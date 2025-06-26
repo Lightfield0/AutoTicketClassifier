@@ -461,3 +461,15 @@ evaluation_results/
 # Temporary monitoring files
 monitoring_report_*.txt
 drift_dashboard.html
+
+# =============================================================================
+# BÜYÜK MODEL DOSYALARI (GitHub için çok büyük)
+# =============================================================================
+
+# BERT modeli (422MB)
+models/trained/bert_classifier.pth
+
+# Büyük eğitim dosyaları
+models/trained/*.pth
+models/trained/*_large.pkl
+models/trained/*_bert.pkl

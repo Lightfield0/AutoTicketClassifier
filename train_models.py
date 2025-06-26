@@ -20,11 +20,11 @@ from models.naive_bayes import NaiveBayesClassifier, train_naive_bayes_pipeline
 from models.logistic_regression import LogisticRegressionClassifier, train_logistic_regression_pipeline
 from models.bert_classifier import BERTTextClassifier, train_bert_pipeline
 
-# Yeni iyileştirmeleri import et
-from improvements.comprehensive_model_evaluation import ModelEvaluator as AdvancedEvaluator
-from improvements.monitoring_dashboard import ModelDriftDetector, PerformanceMonitor, MonitoringDashboard
-from improvements.ab_testing import ABTestFramework
-from improvements.ensemble_system import EnsembleManager
+# Entegre edilmiş iyileştirmeleri import et
+from utils.evaluation import ModelEvaluator as AdvancedEvaluator
+from utils.monitoring import ProductionMonitor as PerformanceMonitor
+from models.ensemble_system import EnsembleManager
+# ABTestingFramework artık ayrı bir utility olarak implement edilecek
 
 class EnhancedModelTrainer:
     def __init__(self, data_path="data/processed_data.csv"):
@@ -52,7 +52,7 @@ class EnhancedModelTrainer:
         self.advanced_evaluator = AdvancedEvaluator()
         self.drift_detector = None  # Eğitim sonrası initialize edilecek
         self.performance_monitor = PerformanceMonitor()
-        self.ab_tester = ABTestFramework()
+        self.ab_tester = None  # ABTestingFramework ayrı class olarak tanımlanacak
         self.ensemble_manager = EnsembleManager()
         
         self.results = {}
@@ -136,26 +136,68 @@ class EnhancedModelTrainer:
         
         return True
     
-    def train_naive_bayes(self, model_type='multinomial'):
-        """Naive Bayes modelini eğit"""
-        print(f"\n🎯 Naive Bayes ({model_type}) Eğitimi")
-        print("="*50)
+    def extract_features_once(self):
+        """Tüm modeller için ortak TF-IDF features oluştur"""
+        print("\n🔤 Ortak TF-IDF features oluşturuluyor...")
         
-        # TF-IDF features
-        tfidf_matrix_train, feature_names = self.feature_extractor.extract_tfidf_features(
-            self.X_train, max_features=3000
+        # Tek bir TF-IDF vectorizer ile tüm features oluştur
+        self.tfidf_matrix_train, self.feature_names = self.feature_extractor.extract_tfidf_features(
+            self.X_train, max_features=2000  # Ortak feature sayısı
         )
-        tfidf_matrix_test = self.feature_extractor.transform_new_text(
+        self.tfidf_matrix_test = self.feature_extractor.transform_new_text(
             self.X_test, feature_type='tfidf'
         )
         
-        # Model eğit
-        nb_model, results = train_naive_bayes_pipeline(
-            tfidf_matrix_train, self.y_train,
-            tfidf_matrix_test, self.y_test,
-            feature_names=feature_names,
-            model_type=model_type
-        )
+        if self.X_val is not None:
+            self.tfidf_matrix_val = self.feature_extractor.transform_new_text(
+                self.X_val, feature_type='tfidf'
+            )
+        else:
+            self.tfidf_matrix_val = None
+        
+        print(f"✅ TF-IDF features hazırlandı: {self.tfidf_matrix_train.shape[1]} features")
+        return True
+    
+    def train_naive_bayes(self, model_type='multinomial'):
+        """Naive Bayes modelini eğit - ortak TF-IDF kullanarak"""
+        print(f"\n🎯 Naive Bayes ({model_type}) Eğitimi")
+        print("="*50)
+        
+        # Ortak TF-IDF features kullan
+        if not hasattr(self, 'tfidf_matrix_train'):
+            raise ValueError("Önce extract_features_once() çalıştırılmalı!")
+        
+        # Model oluştur ve eğit (pipeline yerine direkt eğitim)
+        from models.naive_bayes import NaiveBayesClassifier
+        import time
+        
+        start_time = time.time()
+        
+        # Model oluştur
+        nb_model = NaiveBayesClassifier(model_type=model_type)
+        
+        # Eğit
+        nb_model.train(self.tfidf_matrix_train, self.y_train)
+        
+        # Test et
+        predict_start = time.time()
+        y_pred = nb_model.predict(self.tfidf_matrix_test)
+        predict_time = time.time() - predict_start
+        
+        training_time = time.time() - start_time
+        
+        # Accuracy hesapla
+        from sklearn.metrics import accuracy_score
+        accuracy = accuracy_score(self.y_test, y_pred)
+        
+        # Sonuçları hazırla
+        results = {
+            'accuracy': accuracy,
+            'training_time': training_time,
+            'prediction_time': predict_time,
+            'y_pred': y_pred,
+            'y_true': self.y_test
+        }
         
         # Kaydet
         model_name = f"naive_bayes_{model_type}"
@@ -164,34 +206,79 @@ class EnhancedModelTrainer:
         self.models[model_name] = nb_model
         self.results[model_name] = results
         
+        print(f"✅ Naive Bayes ({model_type}) eğitimi tamamlandı!")
+        print(f"📊 Accuracy: {accuracy:.4f}")
+        print(f"⏱️  Eğitim süresi: {training_time:.2f}s")
+        print(f"⚡ Tahmin süresi: {predict_time:.4f}s")
+        
         # Evaluator'a ekle - sadece sonuçlarla, model prediction yapmadan
         eval_results = self.evaluator.evaluate_model(
-            nb_model, tfidf_matrix_test, self.y_test, 
+            nb_model, self.tfidf_matrix_test, self.y_test, 
             y_pred=results['y_pred'], model_name=f"Naive Bayes ({model_type})"
         )
         
         return nb_model, results
     
     def train_logistic_regression(self, tune_hyperparams=False):
-        """Logistic Regression modelini eğit"""
+        """Logistic Regression modelini eğit - ortak TF-IDF kullanarak"""
         print(f"\n🎯 Logistic Regression Eğitimi")
         print("="*50)
         
-        # TF-IDF features
-        tfidf_matrix_train, feature_names = self.feature_extractor.extract_tfidf_features(
-            self.X_train, max_features=5000
-        )
-        tfidf_matrix_test = self.feature_extractor.transform_new_text(
-            self.X_test, feature_type='tfidf'
-        )
+        # Ortak TF-IDF features kullan
+        if not hasattr(self, 'tfidf_matrix_train'):
+            raise ValueError("Önce extract_features_once() çalıştırılmalı!")
         
-        # Model eğit
-        lr_model, results = train_logistic_regression_pipeline(
-            tfidf_matrix_train, self.y_train,
-            tfidf_matrix_test, self.y_test,
-            feature_names=feature_names,
-            tune_hyperparams=tune_hyperparams
-        )
+        # Model oluştur ve eğit (pipeline yerine direkt eğitim)
+        from models.logistic_regression import LogisticRegressionClassifier
+        import time
+        
+        start_time = time.time()
+        
+        # Model oluştur
+        lr_model = LogisticRegressionClassifier()
+        
+        # Hyperparameter tuning opsiyonel
+        if tune_hyperparams:
+            print("🔧 Hyperparameter tuning aktif...")
+            # Basit grid search
+            from sklearn.model_selection import GridSearchCV
+            from sklearn.linear_model import LogisticRegression
+            
+            param_grid = {
+                'C': [0.1, 1.0, 10.0],
+                'max_iter': [1000, 2000]
+            }
+            
+            base_model = LogisticRegression(random_state=42)
+            grid_search = GridSearchCV(base_model, param_grid, cv=3, scoring='accuracy')
+            grid_search.fit(self.tfidf_matrix_train, self.y_train)
+            
+            # En iyi parametreleri kullan
+            lr_model.model = grid_search.best_estimator_
+            print(f"🎯 En iyi parametreler: {grid_search.best_params_}")
+        else:
+            # Varsayılan parametrelerle eğit
+            lr_model.train(self.tfidf_matrix_train, self.y_train)
+        
+        # Test et
+        predict_start = time.time()
+        y_pred = lr_model.predict(self.tfidf_matrix_test)
+        predict_time = time.time() - predict_start
+        
+        training_time = time.time() - start_time
+        
+        # Accuracy hesapla
+        from sklearn.metrics import accuracy_score
+        accuracy = accuracy_score(self.y_test, y_pred)
+        
+        # Sonuçları hazırla
+        results = {
+            'accuracy': accuracy,
+            'training_time': training_time,
+            'prediction_time': predict_time,
+            'y_pred': y_pred,
+            'y_true': self.y_test
+        }
         
         # Kaydet
         model_name = "logistic_regression"
@@ -200,9 +287,14 @@ class EnhancedModelTrainer:
         self.models[model_name] = lr_model
         self.results[model_name] = results
         
+        print(f"✅ Logistic Regression eğitimi tamamlandı!")
+        print(f"📊 Accuracy: {accuracy:.4f}")
+        print(f"⏱️  Eğitim süresi: {training_time:.2f}s")
+        print(f"⚡ Tahmin süresi: {predict_time:.4f}s")
+        
         # Evaluator'a ekle - sadece sonuçlarla, model prediction yapmadan
         eval_results = self.evaluator.evaluate_model(
-            lr_model, tfidf_matrix_test, self.y_test,
+            lr_model, self.tfidf_matrix_test, self.y_test,
             y_pred=results['y_pred'], model_name="Logistic Regression"
         )
         
@@ -250,6 +342,10 @@ class EnhancedModelTrainer:
         print("="*60)
         
         start_time = time.time()
+        
+        # 0. Ortak TF-IDF features oluştur (TF-IDF kullanan modeller için)
+        print("\n🔤 Ortak TF-IDF features oluşturuluyor...")
+        self.extract_features_once()
         
         # 1. Naive Bayes (Multinomial)
         try:
@@ -307,11 +403,20 @@ class EnhancedModelTrainer:
         
         # Görselleştirme
         if len(self.evaluator.results) > 0:
-            self.evaluator.compare_models(figsize=(14, 10))
-            self.evaluator.plot_performance_vs_time()
+            try:
+                # ModelEvaluator.compare_models sadece results parametresi alır
+                self.evaluator.compare_models(self.evaluator.results)
+                self.evaluator.plot_performance_vs_time()
+            except Exception as e:
+                print(f"⚠️ Görselleştirme hatası: {e}")
+                print("📊 Görselleştirme atlandı, diğer sonuçlar kullanılabilir")
         
         # Özet rapor
-        self.evaluator.generate_summary_report()
+        try:
+            self.evaluator.generate_summary_report()
+        except Exception as e:
+            print(f"⚠️ Özet rapor hatası: {e}")
+            print("📊 Rapor oluşturma atlandı")
         
         return df_comparison
     
@@ -421,7 +526,11 @@ class EnhancedModelTrainer:
         # 1. Veri hazırlama
         print("\n1️⃣ VERİ HAZIRLIĞI")
         self.load_data()
-        self.prepare_data()
+        self.preprocess_data()
+        
+        # 1.5. Ortak TF-IDF features oluştur
+        print("\n🔤 Ortak TF-IDF features oluşturuluyor...")
+        self.extract_features_once()
         
         # 2. Temel modelleri eğit
         print("\n2️⃣ TEMEL MODEL EĞİTİMLERİ")
@@ -434,27 +543,22 @@ class EnhancedModelTrainer:
             
             # Model eğit
             if model_name == 'naive_bayes':
-                model_result = self.train_naive_bayes()
-                model = model_result['model']
+                model, results = self.train_naive_bayes()  # Tuple unpacking
                 
             elif model_name == 'logistic_regression':
-                model_result = self.train_logistic_regression()
-                model = model_result['model']
+                model, results = self.train_logistic_regression()  # Tuple unpacking
             
-            # Feature extraction
-            X_train_features, _ = self.feature_extractor.extract_tfidf_features(
-                self.X_train, max_features=1000
-            )
-            X_test_features = self.feature_extractor.transform_new_text(
-                self.X_test, feature_type='tfidf'
-            )
+            # Ortak TF-IDF matrix'leri kullan
+            X_train_features = self.tfidf_matrix_train
+            X_test_features = self.tfidf_matrix_test
             
-            # Comprehensive evaluation
+            # Comprehensive evaluation - şimdi doğru feature boyutlarıyla
             evaluation_results = self.advanced_evaluator.comprehensive_model_evaluation(
                 model.model if hasattr(model, 'model') else model,
                 X_train_features, X_test_features, 
                 self.y_train, self.y_test, 
-                labels=np.unique(self.y_train)
+                labels=np.unique(self.y_train),
+                model_name=model_name
             )
             
             self.comprehensive_results[model_name] = evaluation_results
@@ -462,7 +566,9 @@ class EnhancedModelTrainer:
         
         # 3. Ensemble methods
         print("\n3️⃣ ENSEMBLE METHODS")
-        ensemble_results = self._train_ensemble_models(X_train_features, X_test_features)
+        
+        # Ortak TF-IDF matrix'lerini kullan
+        ensemble_results = self._train_ensemble_models(self.tfidf_matrix_train, self.tfidf_matrix_test)
         
         # 4. A/B Testing setup
         if enable_ab_testing:
@@ -490,35 +596,42 @@ class EnhancedModelTrainer:
         """Ensemble modellerini eğit"""
         print("🤖 Ensemble modelller eğitiliyor...")
         
-        # Voting ensemble
-        voting_ensemble = self.ensemble_manager.create_voting_ensemble(
-            X_train_features, X_test_features, self.y_train, self.y_test
-        )
-        
-        # Weighted ensemble  
-        weighted_ensemble = self.ensemble_manager.create_weighted_ensemble(
-            X_train_features, self.y_train
-        )
-        
-        # Stacking ensemble
-        stacking_ensemble = self.ensemble_manager.create_stacking_ensemble(
-            X_train_features, self.y_train
-        )
-        
-        # Ensemble karşılaştırması
-        ensemble_results = self.ensemble_manager.compare_ensembles(
-            X_test_features, self.y_test
-        )
-        
-        # En iyi ensemble'ı kaydet
-        best_ensemble_name = max(
-            [(name, res) for name, res in ensemble_results.items() if 'accuracy' in res],
-            key=lambda x: x[1]['accuracy']
-        )[0]
-        
-        if best_ensemble_name in self.ensemble_manager.ensembles:
-            best_ensemble = self.ensemble_manager.ensembles[best_ensemble_name]
-            self.ensemble_manager.save_ensemble(f"best_{best_ensemble_name}", best_ensemble)
+        # Ensemble manager kullanarak basit ensemble oluştur
+        try:
+            # Mevcut modelleri ensemble'a ekle
+            ensemble_models = {}
+            for name, model in self.models.items():
+                if hasattr(model, 'model'):
+                    ensemble_models[name] = model.model
+                else:
+                    ensemble_models[name] = model
+            
+            # Weighted ensemble oluştur
+            from models.ensemble_system import WeightedEnsemble
+            weighted_ensemble = WeightedEnsemble(models=ensemble_models, voting='soft')
+            
+            # Eğit
+            weighted_ensemble.fit(X_train_features, self.y_train)
+            
+            # Test et
+            ensemble_pred = weighted_ensemble.predict(X_test_features)
+            ensemble_accuracy = (ensemble_pred == self.y_test).mean()
+            
+            print(f"✅ Weighted Ensemble Accuracy: {ensemble_accuracy:.4f}")
+            
+            # Ensemble'ı kaydet
+            self.models['weighted_ensemble'] = weighted_ensemble
+            
+            ensemble_results = {
+                'weighted_ensemble': {
+                    'accuracy': ensemble_accuracy,
+                    'predictions': ensemble_pred
+                }
+            }
+            
+        except Exception as e:
+            print(f"⚠️ Ensemble eğitim hatası: {e}")
+            ensemble_results = {}
         
         return ensemble_results
     
@@ -529,35 +642,24 @@ class EnhancedModelTrainer:
         # Model karşılaştırmaları için testler kur
         model_names = list(self.models.keys())
         
+        print("📊 A/B Testing için model karşılaştırmaları:")
         for i in range(len(model_names)):
             for j in range(i + 1, len(model_names)):
                 model_a = model_names[i]
                 model_b = model_names[j]
                 
                 test_name = f"{model_a}_vs_{model_b}"
-                
-                self.ab_tester.setup_test(
-                    model_a=model_a,
-                    model_b=model_b,
-                    test_name=test_name,
-                    description=f"Performance comparison: {model_a} vs {model_b}"
-                )
-                
-                print(f"✅ A/B Test kuruldu: {test_name}")
+                print(f"✅ A/B Test tanımlandı: {test_name}")
+        
+        print("✅ A/B Testing framework kuruldu (placeholder - web app entegrasyonu gerekli)")
     
     def _setup_monitoring_system(self, reference_data):
         """Monitoring sistemini kur"""
         print("📊 Monitoring sistemi kuruluyor...")
         
-        # Drift detector'ı initialize et
-        self.drift_detector = ModelDriftDetector(
-            reference_data=reference_data.toarray() if hasattr(reference_data, 'toarray') else reference_data,
-            threshold=0.05
-        )
-        
-        # Dashboard oluştur
-        self.monitoring_dashboard = MonitoringDashboard(
-            self.performance_monitor, self.drift_detector
+        # Performance monitor baseline data'yı set et
+        self.performance_monitor.set_baseline_data(
+            reference_data.toarray() if hasattr(reference_data, 'toarray') else reference_data
         )
         
         # Initial performance metrics log
@@ -719,7 +821,7 @@ def main():
             trainer.load_data()
             
             # 2. Veri ön işle  
-            trainer.prepare_data(test_size=0.2, val_size=0.1)
+            trainer.preprocess_data(test_size=0.2, val_size=0.1)
             
             # 3. Modelleri eğit
             print("\n🎯 Hangi modelleri eğitmek istiyorsunuz?")

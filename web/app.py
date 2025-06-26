@@ -14,34 +14,358 @@ import joblib
 import json
 import os
 import sys
-from datetime import datetime
+import hashlib
+from datetime import datetime, timedelta
+from scipy import stats
 
 # Kendi modüllerimizi import et
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-try:
-    from utils.text_preprocessing import TurkishTextPreprocessor
-    from utils.feature_extraction import FeatureExtractor
-    from models.naive_bayes import NaiveBayesClassifier
-    from models.logistic_regression import LogisticRegressionClassifier
-except ImportError as e:
-    st.warning(f"Modül import hatası: {e}")
-    # Fallback: Basit sınıflar oluştur
-    class TurkishTextPreprocessor:
-        def preprocess_text(self, text, remove_stopwords=True, apply_stemming=False):
-            import re
-            text = str(text).lower()
-            text = re.sub(r'[^\w\sçğıöşü]', ' ', text)
-            text = re.sub(r'\s+', ' ', text).strip()
-            return text
+from utils.text_preprocessing import TurkishTextPreprocessor
+from utils.feature_extraction import FeatureExtractor
+from models.naive_bayes import NaiveBayesClassifier
+from models.logistic_regression import LogisticRegressionClassifier
+
+# A/B Testing Framework
+class ABTestingFramework:
+    def __init__(self, test_config=None):
+        self.test_config = test_config or {}
+        self.experiments = {}
+        self.results = {}
+        
+        # Load experiments from file if exists
+        if os.path.exists('ab_experiments.json'):
+            try:
+                with open('ab_experiments.json', 'r') as f:
+                    self.experiments = json.load(f)
+            except:
+                pass
     
-    class FeatureExtractor:
-        pass
+    def create_experiment(self, experiment_name, models, traffic_split=None):
+        """Create a new A/B test experiment"""
+        if traffic_split is None:
+            traffic_split = {name: 1.0/len(models) for name in models.keys()}
+        
+        experiment = {
+            'name': experiment_name,
+            'models': list(models.keys()),
+            'traffic_split': traffic_split,
+            'start_date': datetime.now().isoformat(),
+            'status': 'active',
+            'results': []
+        }
+        
+        self.experiments[experiment_name] = experiment
+        self._save_experiments()
+        return experiment
     
-    class NaiveBayesClassifier:
-        pass
+    def assign_user_to_variant(self, user_id, experiment_name):
+        """Assign user to a model variant based on consistent hashing"""
+        if experiment_name not in self.experiments:
+            return None
+        
+        experiment = self.experiments[experiment_name]
+        
+        # Consistent hashing for stable assignment
+        hash_input = f"{user_id}_{experiment_name}".encode()
+        hash_value = int(hashlib.md5(hash_input).hexdigest(), 16)
+        normalized_hash = (hash_value % 10000) / 10000.0
+        
+        # Determine which variant based on traffic split
+        cumulative_probability = 0
+        for model_name, probability in experiment['traffic_split'].items():
+            cumulative_probability += probability
+            if normalized_hash <= cumulative_probability:
+                return model_name
+        
+        # Fallback to first model
+        return experiment['models'][0]
     
-    class LogisticRegressionClassifier:
-        pass
+    def log_experiment_result(self, experiment_name, user_id, model_used, 
+                            prediction, actual_label=None, user_feedback=None,
+                            response_time=None):
+        """Log experiment result"""
+        if experiment_name not in self.experiments:
+            return
+        
+        result = {
+            'timestamp': datetime.now().isoformat(),
+            'user_id': user_id,
+            'model_used': model_used,
+            'prediction': prediction,
+            'actual_label': actual_label,
+            'user_feedback': user_feedback,
+            'response_time': response_time,
+            'correct_prediction': actual_label == prediction if actual_label else None
+        }
+        
+        self.experiments[experiment_name]['results'].append(result)
+        self._save_experiments()
+    
+    def analyze_experiment(self, experiment_name, min_samples=30):
+        """Analyze A/B test results"""
+        if experiment_name not in self.experiments:
+            return None
+        
+        experiment = self.experiments[experiment_name]
+        results_df = pd.DataFrame(experiment['results'])
+        
+        if len(results_df) < min_samples:
+            return {'status': 'insufficient_data', 'samples': len(results_df), 'required': min_samples}
+        
+        # Group by model
+        model_performance = {}
+        
+        for model_name in experiment['models']:
+            model_results = results_df[results_df['model_used'] == model_name]
+            if len(model_results) > 0:
+                model_performance[model_name] = {
+                    'samples': len(model_results),
+                    'accuracy': model_results['correct_prediction'].mean() if 'correct_prediction' in model_results else None,
+                    'avg_response_time': model_results['response_time'].mean() if 'response_time' in model_results else None,
+                    'positive_feedback': (model_results['user_feedback'] == 'positive').sum() if 'user_feedback' in model_results else None
+                }
+        
+        return {
+            'status': 'success',
+            'experiment_name': experiment_name,
+            'total_samples': len(results_df),
+            'model_performance': model_performance
+        }
+    
+    def _save_experiments(self):
+        """Save experiments to file"""
+        try:
+            with open('ab_experiments.json', 'w') as f:
+                json.dump(self.experiments, f, indent=2)
+        except Exception as e:
+            st.error(f"Experiment kaydetme hatası: {e}")
+
+# Performance Monitor
+class PerformanceMonitor:
+    def __init__(self):
+        self.predictions_log = []
+        self.load_logs()
+    
+    def log_prediction(self, model_name, input_text, prediction, confidence, 
+                      processing_time=None, user_feedback=None):
+        """Log prediction for monitoring"""
+        log_entry = {
+            'timestamp': datetime.now().isoformat(),
+            'model_name': model_name,
+            'input_text': input_text[:100],  # Limit text length
+            'prediction': prediction,
+            'confidence': confidence,
+            'processing_time': processing_time,
+            'user_feedback': user_feedback,
+            'text_length': len(input_text),
+            'word_count': len(input_text.split())
+        }
+        
+        self.predictions_log.append(log_entry)
+        
+        # Keep only last 1000 predictions
+        if len(self.predictions_log) > 1000:
+            self.predictions_log = self.predictions_log[-1000:]
+        
+        self.save_logs()
+    
+    def get_recent_stats(self, hours=24):
+        """Get recent performance statistics"""
+        cutoff_time = datetime.now() - timedelta(hours=hours)
+        
+        recent_predictions = [
+            p for p in self.predictions_log 
+            if datetime.fromisoformat(p['timestamp']) > cutoff_time
+        ]
+        
+        if not recent_predictions:
+            return {}
+        
+        df = pd.DataFrame(recent_predictions)
+        
+        stats = {
+            'total_predictions': len(df),
+            'avg_confidence': df['confidence'].mean(),
+            'prediction_distribution': df['prediction'].value_counts().to_dict(),
+            'avg_processing_time': df['processing_time'].mean() if 'processing_time' in df else None,
+            'models_used': df['model_name'].value_counts().to_dict()
+        }
+        
+        return stats
+    
+    def save_logs(self):
+        """Save prediction logs"""
+        try:
+            with open('prediction_logs.json', 'w') as f:
+                json.dump(self.predictions_log, f, indent=2)
+        except Exception as e:
+            pass  # Silent fail for demo
+    
+    def load_logs(self):
+        """Load prediction logs"""
+        try:
+            if os.path.exists('prediction_logs.json'):
+                with open('prediction_logs.json', 'r') as f:
+                    self.predictions_log = json.load(f)
+        except Exception as e:
+            self.predictions_log = []
+
+# Data Augmentation için utils'e ekleme
+class DataAugmentationPipeline:
+    def __init__(self):
+        self.synonyms = {
+            'ödeme': ['ücret', 'para', 'tutar', 'bedel', 'ödeme'],
+            'rezervasyon': ['booking', 'ayırma', 'rezerve', 'rezervasyon'],
+            'sorun': ['problem', 'hata', 'sıkıntı', 'mesele', 'sorun'],
+            'şikayet': ['yakınma', 'memnuniyetsizlik', 'rahatsızlık', 'şikayet'],
+            'iptal': ['cancel', 'vazgeçme', 'geri alma', 'iptal'],
+            'değişiklik': ['change', 'revizyon', 'güncelleme', 'değişiklik']
+        }
+    
+    def augment_with_synonyms(self, text, augment_ratio=0.3):
+        """Synonym replacement ile veri çoğaltma"""
+        words = text.split()
+        augmented_texts = [text]  # Original text
+        
+        # Create variations with synonym replacement
+        for _ in range(max(1, int(len(words) * augment_ratio))):
+            new_words = words.copy()
+            
+            for i, word in enumerate(new_words):
+                if word.lower() in self.synonyms:
+                    synonyms = self.synonyms[word.lower()]
+                    if len(synonyms) > 1:
+                        # Replace with a different synonym
+                        new_word = np.random.choice([s for s in synonyms if s != word.lower()])
+                        new_words[i] = new_word
+            
+            augmented_text = ' '.join(new_words)
+            if augmented_text != text:
+                augmented_texts.append(augmented_text)
+        
+        return augmented_texts
+    
+    def augment_dataset(self, df, text_column='message', target_column='category', 
+                       min_samples_per_class=100):
+        """Dataset'i dengelemek için augmentation uygula"""
+        augmented_data = []
+        
+        for category in df[target_column].unique():
+            category_data = df[df[target_column] == category]
+            current_count = len(category_data)
+            
+            if current_count < min_samples_per_class:
+                needed_samples = min_samples_per_class - current_count
+                
+                # Mevcut örnekleri tekrar et ve augment et
+                for _, sample in category_data.iterrows():
+                    original_text = sample[text_column]
+                    augmented_texts = self.augment_with_synonyms(original_text)
+                    
+                    # Add augmented versions
+                    for aug_text in augmented_texts[1:]:  # Skip original
+                        new_sample = sample.copy()
+                        new_sample[text_column] = aug_text
+                        augmented_data.append(new_sample)
+                        
+                        if len(augmented_data) >= needed_samples:
+                            break
+                    
+                    if len(augmented_data) >= needed_samples:
+                        break
+        
+        # Combine original and augmented data
+        if augmented_data:
+            augmented_df = pd.DataFrame(augmented_data)
+            return pd.concat([df, augmented_df], ignore_index=True)
+        
+        return df
+
+# Advanced Model Validation
+class AdvancedModelValidator:
+    def __init__(self, cv_folds=5):
+        self.cv_folds = cv_folds
+        self.results = {}
+    
+    def cross_validate_models(self, models, X, y):
+        """K-fold cross validation for all models"""
+        from sklearn.model_selection import StratifiedKFold
+        from sklearn.metrics import accuracy_score
+        
+        skf = StratifiedKFold(n_splits=self.cv_folds, shuffle=True, random_state=42)
+        
+        for model_name, model in models.items():
+            st.write(f"🔄 Cross-validating {model_name}...")
+            cv_scores = []
+            
+            for fold, (train_idx, val_idx) in enumerate(skf.split(X, y)):
+                X_train_fold = X[train_idx] if hasattr(X, '__getitem__') else X.iloc[train_idx]
+                X_val_fold = X[val_idx] if hasattr(X, '__getitem__') else X.iloc[val_idx]
+                y_train_fold = y[train_idx] if hasattr(y, '__getitem__') else y.iloc[train_idx]
+                y_val_fold = y[val_idx] if hasattr(y, '__getitem__') else y.iloc[val_idx]
+                
+                # Train model
+                if hasattr(model, 'train'):
+                    model.train(X_train_fold, y_train_fold)
+                else:
+                    model.fit(X_train_fold, y_train_fold)
+                
+                # Predict
+                if hasattr(model, 'predict'):
+                    y_pred = model.predict(X_val_fold)
+                else:
+                    y_pred = model.predict(X_val_fold)
+                
+                score = accuracy_score(y_val_fold, y_pred)
+                cv_scores.append(score)
+            
+            mean_score = np.mean(cv_scores)
+            std_score = np.std(cv_scores)
+            
+            self.results[model_name] = {
+                'cv_scores': cv_scores,
+                'mean_score': mean_score,
+                'std_score': std_score
+            }
+        
+        return self.results
+    
+    def generate_validation_report(self):
+        """Validation raporu oluştur"""
+        if not self.results:
+            return "No validation results available"
+        
+        report = "📊 **Cross-Validation Results**\n\n"
+        
+        for model_name, result in self.results.items():
+            report += f"**{model_name}:**\n"
+            report += f"- Mean Accuracy: {result['mean_score']:.4f} ± {result['std_score']:.4f}\n"
+            report += f"- CV Scores: {[f'{score:.3f}' for score in result['cv_scores']]}\n\n"
+        
+        return report
+
+# Initialize global objects
+@st.cache_resource
+def get_ab_testing_framework():
+    return ABTestingFramework()
+
+@st.cache_resource
+def get_performance_monitor():
+    return PerformanceMonitor()
+
+@st.cache_resource  
+def get_data_augmenter():
+    return DataAugmentationPipeline()
+
+@st.cache_resource
+def get_validator():
+    return AdvancedModelValidator()
+
+# Global instances
+ab_tester = get_ab_testing_framework()
+monitor = get_performance_monitor()
+data_augmenter = get_data_augmenter()
+validator = get_validator()
 
 # Sayfa konfigürasyonu
 st.set_page_config(
@@ -339,7 +663,7 @@ def main():
             clear_button = st.button("🗑️ Temizle")
             if clear_button:
                 st.session_state.example_text = ''
-                st.experimental_rerun()
+                st.rerun()  # st.experimental_rerun yerine st.rerun
         
         # Tahmin sonuçları
         if predict_button and user_text.strip():

@@ -210,6 +210,12 @@ class TicketDataGenerator:
             
         return tickets
 
+    def generate_comprehensive_dataset(self, n_samples=1000):
+        """Comprehensive dataset oluştur (DataFrame döndürür)"""
+        tickets = self.generate_tickets(num_tickets=n_samples)
+        df = pd.DataFrame(tickets)
+        return df
+
     def save_data(self, tickets, format_type="both"):
         """Veriyi JSON ve/veya CSV olarak kaydeder"""
         

@@ -12,8 +12,11 @@ from sklearn.metrics import (
     classification_report, confusion_matrix, roc_auc_score,
     precision_recall_curve, roc_curve
 )
-from sklearn.model_selection import cross_val_score
+from sklearn.model_selection import cross_val_score, StratifiedKFold, learning_curve
+from scipy import stats
 import time
+import warnings
+warnings.filterwarnings('ignore')
 
 class ModelEvaluator:
     def __init__(self):
@@ -115,199 +118,375 @@ class ModelEvaluator:
         
         return cm, cm_normalized
     
-    def compare_models(self, figsize=(12, 8)):
-        """Model karşılaştırması görselleştirme"""
-        if len(self.results) < 2:
-            print("❌ Karşılaştırma için en az 2 model gerekli")
-            return
+    def comprehensive_model_evaluation(self, model, X_train, X_test, y_train, y_test, 
+                                     labels=None, model_name="Model"):
+        """
+        Kapsamlı model değerlendirme sistemi:
+        - Confusion matrix
+        - Classification report  
+        - K-fold cross validation
+        - Learning curves
+        - Overfitting kontrolü
+        """
+        print(f"🔍 {model_name} için kapsamlı değerlendirme başlıyor...")
         
-        # Sonuçları DataFrame'e çevir
-        comparison_data = []
-        for model_name, results in self.results.items():
-            comparison_data.append({
-                'Model': model_name,
-                'Accuracy': results['accuracy'],
-                'Precision': results['precision'],
-                'Recall': results['recall'],
-                'F1-Score': results['f1_score'],
-                'Prediction Time (s)': results['prediction_time']
-            })
+        results = {
+            'model_name': model_name,
+            'timestamp': time.time(),
+            'basic_metrics': {},
+            'cross_validation': {},
+            'learning_curves': {},
+            'overfitting_analysis': {}
+        }
         
-        df_comparison = pd.DataFrame(comparison_data)
-        
-        # Görselleştirme
-        fig, axes = plt.subplots(2, 2, figsize=figsize)
-        
-        metrics = ['Accuracy', 'Precision', 'Recall', 'F1-Score']
-        colors = ['skyblue', 'lightgreen', 'lightcoral', 'lightsalmon']
-        
-        for i, metric in enumerate(metrics):
-            ax = axes[i//2, i%2]
-            bars = ax.bar(df_comparison['Model'], df_comparison[metric], 
-                         color=colors[i], alpha=0.7)
-            ax.set_title(f'{metric} Karşılaştırması')
-            ax.set_ylim(0, 1)
-            ax.tick_params(axis='x', rotation=45)
+        # 1. Temel Metrikler
+        if hasattr(model, 'predict'):
+            y_pred = model.predict(X_test)
+        else:
+            y_pred = model.predict(X_test)
             
-            # Değerleri bar'ların üzerine yaz
-            for bar, value in zip(bars, df_comparison[metric]):
-                ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01,
-                       f'{value:.3f}', ha='center', va='bottom')
+        results['basic_metrics'] = {
+            'accuracy': accuracy_score(y_test, y_pred),
+            'precision': precision_score(y_test, y_pred, average='weighted'),
+            'recall': recall_score(y_test, y_pred, average='weighted'),
+            'f1': f1_score(y_test, y_pred, average='weighted')
+        }
+        
+        # 2. Confusion Matrix
+        cm = confusion_matrix(y_test, y_pred, labels=labels)
+        self._plot_confusion_matrix(cm, labels, model_name)
+        
+        # 3. Classification Report
+        report = classification_report(y_test, y_pred, target_names=labels, output_dict=True)
+        results['classification_report'] = report
+        
+        # 4. K-Fold Cross Validation
+        if hasattr(model, 'model'):  # Sklearn modeli varsa
+            cv_scores = cross_val_score(model.model, X_train, y_train, cv=5, scoring='accuracy')
+            results['cross_validation'] = {
+                'cv_scores': cv_scores.tolist(),
+                'mean_cv_score': cv_scores.mean(),
+                'std_cv_score': cv_scores.std()
+            }
+        
+        # 5. Learning Curves
+        if hasattr(model, 'model'):
+            train_sizes, train_scores, val_scores = learning_curve(
+                model.model, X_train, y_train, cv=5, n_jobs=-1,
+                train_sizes=np.linspace(0.1, 1.0, 10)
+            )
+            
+            results['learning_curves'] = {
+                'train_sizes': train_sizes.tolist(),
+                'train_scores_mean': train_scores.mean(axis=1).tolist(),
+                'train_scores_std': train_scores.std(axis=1).tolist(),
+                'val_scores_mean': val_scores.mean(axis=1).tolist(),
+                'val_scores_std': val_scores.std(axis=1).tolist()
+            }
+            
+            self._plot_learning_curves(train_sizes, train_scores, val_scores, model_name)
+        
+        # 6. Overfitting Analizi
+        train_acc = accuracy_score(y_train, model.predict(X_train))
+        test_acc = results['basic_metrics']['accuracy']
+        overfitting_gap = train_acc - test_acc
+        
+        results['overfitting_analysis'] = {
+            'train_accuracy': train_acc,
+            'test_accuracy': test_acc,
+            'overfitting_gap': overfitting_gap,
+            'is_overfitting': overfitting_gap > 0.1,  # %10'dan fazla fark varsa overfitting
+            'recommendation': self._get_overfitting_recommendation(overfitting_gap)
+        }
+        
+        self.results[model_name] = results
+        
+        # Sonuçları yazdır
+        self._print_comprehensive_results(results)
+        
+        return results
+    
+    def _plot_confusion_matrix(self, cm, labels, model_name):
+        """Confusion matrix görselleştirme"""
+        plt.figure(figsize=(10, 8))
+        
+        # Raw confusion matrix
+        plt.subplot(1, 2, 1)
+        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
+                   xticklabels=labels, yticklabels=labels)
+        plt.title(f'{model_name} - Confusion Matrix (Raw)')
+        plt.ylabel('True Label')
+        plt.xlabel('Predicted Label')
+        
+        # Normalized confusion matrix
+        plt.subplot(1, 2, 2)
+        cm_normalized = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
+        sns.heatmap(cm_normalized, annot=True, fmt='.2f', cmap='Blues',
+                   xticklabels=labels, yticklabels=labels)
+        plt.title(f'{model_name} - Confusion Matrix (Normalized)')
+        plt.ylabel('True Label')
+        plt.xlabel('Predicted Label')
         
         plt.tight_layout()
+        plt.savefig(f'evaluation_results/{model_name}_confusion_matrix.png', dpi=300, bbox_inches='tight')
         plt.show()
-        
-        return df_comparison
     
-    def plot_performance_vs_time(self):
-        """Performans vs Hız karşılaştırması"""
-        if len(self.results) < 2:
-            print("❌ Karşılaştırma için en az 2 model gerekli")
-            return
-        
-        models = list(self.results.keys())
-        f1_scores = [self.results[model]['f1_score'] for model in models]
-        times = [self.results[model]['prediction_time'] for model in models]
-        
+    def _plot_learning_curves(self, train_sizes, train_scores, val_scores, model_name):
+        """Learning curves görselleştirme"""
         plt.figure(figsize=(10, 6))
         
-        # Scatter plot
-        scatter = plt.scatter(times, f1_scores, s=100, alpha=0.7, c=range(len(models)), cmap='viridis')
+        train_mean = train_scores.mean(axis=1)
+        train_std = train_scores.std(axis=1)
+        val_mean = val_scores.mean(axis=1)
+        val_std = val_scores.std(axis=1)
         
-        # Model isimlerini ekle
-        for i, model in enumerate(models):
-            plt.annotate(model, (times[i], f1_scores[i]), 
-                        xytext=(5, 5), textcoords='offset points')
+        plt.plot(train_sizes, train_mean, 'o-', label='Training Score', color='blue')
+        plt.fill_between(train_sizes, train_mean - train_std, train_mean + train_std, alpha=0.1, color='blue')
         
-        plt.xlabel('Tahmin Süresi (saniye)')
-        plt.ylabel('F1-Score')
-        plt.title('Model Performansı vs Hız')
-        plt.grid(True, alpha=0.3)
+        plt.plot(train_sizes, val_mean, 'o-', label='Validation Score', color='red')
+        plt.fill_between(train_sizes, val_mean - val_std, val_mean + val_std, alpha=0.1, color='red')
         
-        # İdeal bölge (düşük süre, yüksek performans)
-        plt.axhline(y=max(f1_scores), color='green', linestyle='--', alpha=0.5, label='En İyi F1-Score')
-        plt.axvline(x=min(times), color='blue', linestyle='--', alpha=0.5, label='En Hızlı Model')
-        
+        plt.xlabel('Training Examples')
+        plt.ylabel('Score')
+        plt.title(f'{model_name} - Learning Curves')
         plt.legend()
+        plt.grid(True, alpha=0.3)
         plt.tight_layout()
+        plt.savefig(f'evaluation_results/{model_name}_learning_curves.png', dpi=300, bbox_inches='tight')
         plt.show()
     
-    def cross_validate_model(self, model, X, y, cv=5, scoring='f1_weighted'):
-        """Cross-validation ile model değerlendirme"""
-        print(f"🔄 {cv}-fold cross-validation yapılıyor...")
-        
-        start_time = time.time()
-        scores = cross_val_score(model, X, y, cv=cv, scoring=scoring)
-        cv_time = time.time() - start_time
-        
-        print(f"✅ Cross-Validation Sonuçları ({scoring}):")
-        print(f"   Ortalama: {scores.mean():.4f} (±{scores.std() * 2:.4f})")
-        print(f"   Min: {scores.min():.4f}")
-        print(f"   Max: {scores.max():.4f}")
-        print(f"   CV Süresi: {cv_time:.2f}s")
-        
-        return scores
+    def _get_overfitting_recommendation(self, gap):
+        """Overfitting durumuna göre öneri ver"""
+        if gap < 0.05:
+            return "✅ Model iyi genelleme yapıyor"
+        elif gap < 0.1:
+            return "⚠️ Hafif overfitting var, düzenleme teknikleri düşünülebilir"
+        elif gap < 0.2:
+            return "🔴 Overfitting var! Regularization, dropout, daha fazla veri gerekli"
+        else:
+            return "🚨 Ciddi overfitting! Model karmaşıklığını azaltın"
     
-    def generate_summary_report(self, class_names=None):
-        """Özet rapor oluştur"""
-        if not self.results:
-            print("❌ Değerlendirilecek model bulunamadı")
-            return
+    def _print_comprehensive_results(self, results):
+        """Comprehensive results'ı yazdır"""
+        print(f"\n📊 {results['model_name']} - KAPSAMLI DEĞERLENDİRME SONUÇLARI")
+        print("=" * 60)
         
-        print("\n" + "="*80)
-        print("📊 MODEL PERFORMANS ÖZET RAPORU")
-        print("="*80)
+        # Temel metrikler
+        metrics = results['basic_metrics']
+        print(f"🎯 Temel Metrikler:")
+        print(f"   Accuracy:  {metrics['accuracy']:.4f}")
+        print(f"   Precision: {metrics['precision']:.4f}")
+        print(f"   Recall:    {metrics['recall']:.4f}")
+        print(f"   F1-Score:  {metrics['f1']:.4f}")
+        
+        # Cross validation
+        if 'cv_scores' in results['cross_validation']:
+            cv = results['cross_validation']
+            print(f"\n🔄 Cross Validation:")
+            print(f"   CV Accuracy: {cv['mean_cv_score']:.4f} ± {cv['std_cv_score']:.4f}")
+        
+        # Overfitting analizi
+        ov = results['overfitting_analysis']
+        print(f"\n🔍 Overfitting Analizi:")
+        print(f"   Train Accuracy: {ov['train_accuracy']:.4f}")
+        print(f"   Test Accuracy:  {ov['test_accuracy']:.4f}")
+        print(f"   Gap: {ov['overfitting_gap']:.4f}")
+        print(f"   {ov['recommendation']}")
+        
+        print("\n" + "=" * 60)
+    
+    def detect_data_drift(self, baseline_data, new_data, method='ks_test', threshold=0.05):
+        """
+        Data drift detection
+        
+        Methods:
+        - ks_test: Kolmogorov-Smirnov test
+        - chi2_test: Chi-square test  
+        - psi: Population Stability Index
+        """
+        drift_results = {
+            'method': method,
+            'threshold': threshold,
+            'features_with_drift': [],
+            'overall_drift_detected': False,
+            'drift_scores': {}
+        }
+        
+        if method == 'ks_test':
+            for i in range(min(baseline_data.shape[1], new_data.shape[1])):
+                baseline_feature = baseline_data[:, i]
+                new_feature = new_data[:, i]
+                
+                # Kolmogorov-Smirnov test
+                ks_stat, p_value = stats.ks_2samp(baseline_feature, new_feature)
+                
+                drift_results['drift_scores'][f'feature_{i}'] = {
+                    'ks_statistic': ks_stat,
+                    'p_value': p_value,
+                    'drift_detected': p_value < threshold
+                }
+                
+                if p_value < threshold:
+                    drift_results['features_with_drift'].append(f'feature_{i}')
+        
+        drift_results['overall_drift_detected'] = len(drift_results['features_with_drift']) > 0
+        
+        return drift_results
+    
+    def compare_models(self, models_results):
+        """Birden fazla modeli karşılaştır"""
+        print("\n🏆 MODEL KARŞILAŞTIRMASI")
+        print("=" * 50)
+        
+        # Metrik tablosu oluştur
+        comparison_data = []
+        
+        for model_name, results in models_results.items():
+            if 'basic_metrics' in results:
+                metrics = results['basic_metrics']
+                row = {
+                    'Model': model_name,
+                    'Accuracy': metrics['accuracy'],
+                    'Precision': metrics['precision'],
+                    'Recall': metrics['recall'],
+                    'F1-Score': metrics['f1']
+                }
+                
+                # Overfitting bilgisi ekle
+                if 'overfitting_analysis' in results:
+                    ov = results['overfitting_analysis']
+                    row['Overfitting Gap'] = ov['overfitting_gap']
+                    row['Is Overfitting'] = ov['is_overfitting']
+                
+                comparison_data.append(row)
+        
+        comparison_df = pd.DataFrame(comparison_data)
         
         # En iyi modeli bul
-        best_model = max(self.results.keys(), 
-                        key=lambda x: self.results[x]['f1_score'])
+        best_model = comparison_df.loc[comparison_df['Accuracy'].idxmax(), 'Model']
         
-        print(f"\n🏆 En İyi Model: {best_model}")
-        print(f"   F1-Score: {self.results[best_model]['f1_score']:.4f}")
-        print(f"   Accuracy: {self.results[best_model]['accuracy']:.4f}")
+        print(comparison_df.to_string(index=False, float_format='%.4f'))
+        print(f"\n🥇 En İyi Model: {best_model}")
         
-        # En hızlı model
-        fastest_model = min(self.results.keys(),
-                           key=lambda x: self.results[x]['prediction_time'])
+        return comparison_df
+    
+    def generate_summary_report(self, class_names=None):
+        """Generate a comprehensive summary report"""
+        print("\n📋 MODEL EVALUATION SUMMARY")
+        print("=" * 50)
         
-        print(f"\n⚡ En Hızlı Model: {fastest_model}")
-        print(f"   Tahmin Süresi: {self.results[fastest_model]['prediction_time']:.3f}s")
-        print(f"   F1-Score: {self.results[fastest_model]['f1_score']:.4f}")
+        if not self.results:
+            print("❌ No evaluation results found")
+            return
         
-        # Tüm modeller tablosu
-        print(f"\n📋 Tüm Modeller:")
-        print(f"{'Model':<20} {'Accuracy':<10} {'F1-Score':<10} {'Süre (s)':<10}")
-        print("-" * 50)
+        # Model count
+        print(f"📊 Total models evaluated: {len(self.results)}")
         
-        for model_name, results in self.results.items():
-            print(f"{model_name:<20} {results['accuracy']:<10.4f} {results['f1_score']:<10.4f} {results['prediction_time']:<10.3f}")
+        # Best model by accuracy
+        best_model = max(self.results.keys(), key=lambda x: self.results[x].get('accuracy', 0))
+        best_accuracy = self.results[best_model].get('accuracy', 0)
         
-        # Öneriler
-        print(f"\n💡 Öneriler:")
-        if self.results[best_model]['f1_score'] > 0.9:
-            print("   ✅ Mükemmel performans! Production'a hazır.")
-        elif self.results[best_model]['f1_score'] > 0.8:
-            print("   ✅ İyi performans! Küçük iyileştirmeler yapılabilir.")
+        print(f"🏆 Best model: {best_model}")
+        print(f"🎯 Best accuracy: {best_accuracy:.4f}")
+        
+        # Average metrics
+        accuracies = [r.get('accuracy', 0) for r in self.results.values()]
+        precisions = [r.get('precision', 0) for r in self.results.values()]
+        recalls = [r.get('recall', 0) for r in self.results.values()]
+        f1_scores = [r.get('f1_score', 0) for r in self.results.values()]
+        
+        print(f"\n📈 Average Metrics:")
+        print(f"   Accuracy:  {np.mean(accuracies):.4f} ± {np.std(accuracies):.4f}")
+        print(f"   Precision: {np.mean(precisions):.4f} ± {np.std(precisions):.4f}")
+        print(f"   Recall:    {np.mean(recalls):.4f} ± {np.std(recalls):.4f}")
+        print(f"   F1-Score:  {np.mean(f1_scores):.4f} ± {np.std(f1_scores):.4f}")
+        
+        # Performance tiers
+        excellent_models = [name for name, res in self.results.items() if res.get('accuracy', 0) >= 0.9]
+        good_models = [name for name, res in self.results.items() if 0.8 <= res.get('accuracy', 0) < 0.9]
+        fair_models = [name for name, res in self.results.items() if res.get('accuracy', 0) < 0.8]
+        
+        print(f"\n🎯 Performance Tiers:")
+        if excellent_models:
+            print(f"   🌟 Excellent (≥90%): {', '.join(excellent_models)}")
+        if good_models:
+            print(f"   ✅ Good (80-90%): {', '.join(good_models)}")
+        if fair_models:
+            print(f"   ⚠️ Fair (<80%): {', '.join(fair_models)}")
+        
+        # Recommendations
+        print(f"\n💡 Recommendations:")
+        if best_accuracy >= 0.95:
+            print("   🚀 Ready for production!")
+        elif best_accuracy >= 0.9:
+            print("   ✅ Good performance, minor tuning recommended")
+        elif best_accuracy >= 0.8:
+            print("   🔧 Needs improvement before production")
         else:
-            print("   ⚠️  Performans artırımı gerekli. Daha fazla veri veya feature engineering önerilidir.")
+            print("   ⚠️ Significant improvement required")
         
-        if self.results[fastest_model]['prediction_time'] < 0.1:
-            print("   ⚡ Hız mükemmel! Real-time uygulamalar için uygun.")
-        elif self.results[fastest_model]['prediction_time'] < 1.0:
-            print("   ⚡ Hız iyi! Çoğu uygulama için yeterli.")
-        else:
-            print("   🐌 Hız optimizasyonu gerekebilir.")
-
-def demo_evaluation():
-    """Değerlendirme demo'su"""
-    print("🧪 Model Değerlendirme Demo'su")
-    print("=" * 50)
+        if len(excellent_models) > 1:
+            print("   🤖 Consider ensemble methods")
+        
+        print("=" * 50)
+        
+        return {
+            'best_model': best_model,
+            'best_accuracy': best_accuracy,
+            'average_accuracy': np.mean(accuracies),
+            'model_count': len(self.results)
+        }
     
-    # Örnek veri oluştur
-    np.random.seed(42)
-    n_samples = 1000
-    n_classes = 6
-    
-    y_true = np.random.randint(0, n_classes, n_samples)
-    
-    # Farklı performanslarda 3 model simülasyonu
-    # Model 1: İyi performans
-    y_pred1 = y_true.copy()
-    noise_indices = np.random.choice(n_samples, int(n_samples * 0.15), replace=False)
-    y_pred1[noise_indices] = np.random.randint(0, n_classes, len(noise_indices))
-    
-    # Model 2: Orta performans
-    y_pred2 = y_true.copy()
-    noise_indices = np.random.choice(n_samples, int(n_samples * 0.25), replace=False)
-    y_pred2[noise_indices] = np.random.randint(0, n_classes, len(noise_indices))
-    
-    # Model 3: Düşük performans
-    y_pred3 = y_true.copy()
-    noise_indices = np.random.choice(n_samples, int(n_samples * 0.4), replace=False)
-    y_pred3[noise_indices] = np.random.randint(0, n_classes, len(noise_indices))
-    
-    # Evaluator oluştur
-    evaluator = ModelEvaluator()
-    
-    # Modelleri değerlendir
-    class MockModel:
-        def __init__(self, predictions):
-            self.predictions = predictions
-        def predict(self, X):
-            return self.predictions
-    
-    X_dummy = np.zeros((n_samples, 10))  # Dummy features
-    
-    evaluator.evaluate_model(MockModel(y_pred1), X_dummy, y_true, model_name="BERT Classifier")
-    evaluator.evaluate_model(MockModel(y_pred2), X_dummy, y_true, model_name="Logistic Regression")
-    evaluator.evaluate_model(MockModel(y_pred3), X_dummy, y_true, model_name="Naive Bayes")
-    
-    # Karşılaştırma
-    class_names = ["Ödeme", "Rezervasyon", "Kullanıcı", "Şikayet", "Bilgi", "Teknik"]
-    comparison_df = evaluator.compare_models()
-    
-    # Özet rapor
-    evaluator.generate_summary_report(class_names)
+    def demo_evaluation():
+        """Değerlendirme demo'su"""
+        print("🧪 Model Değerlendirme Demo'su")
+        print("=" * 50)
+        
+        # Örnek veri oluştur
+        np.random.seed(42)
+        n_samples = 1000
+        n_classes = 6
+        
+        y_true = np.random.randint(0, n_classes, n_samples)
+        
+        # Farklı performanslarda 3 model simülasyonu
+        # Model 1: İyi performans
+        y_pred1 = y_true.copy()
+        noise_indices = np.random.choice(n_samples, int(n_samples * 0.15), replace=False)
+        y_pred1[noise_indices] = np.random.randint(0, n_classes, len(noise_indices))
+        
+        # Model 2: Orta performans
+        y_pred2 = y_true.copy()
+        noise_indices = np.random.choice(n_samples, int(n_samples * 0.25), replace=False)
+        y_pred2[noise_indices] = np.random.randint(0, n_classes, len(noise_indices))
+        
+        # Model 3: Düşük performans
+        y_pred3 = y_true.copy()
+        noise_indices = np.random.choice(n_samples, int(n_samples * 0.4), replace=False)
+        y_pred3[noise_indices] = np.random.randint(0, n_classes, len(noise_indices))
+        
+        # Evaluator oluştur
+        evaluator = ModelEvaluator()
+        
+        # Modelleri değerlendir
+        class MockModel:
+            def __init__(self, predictions):
+                self.predictions = predictions
+            def predict(self, X):
+                return self.predictions
+        
+        X_dummy = np.zeros((n_samples, 10))  # Dummy features
+        
+        evaluator.evaluate_model(MockModel(y_pred1), X_dummy, y_true, model_name="BERT Classifier")
+        evaluator.evaluate_model(MockModel(y_pred2), X_dummy, y_true, model_name="Logistic Regression")
+        evaluator.evaluate_model(MockModel(y_pred3), X_dummy, y_true, model_name="Naive Bayes")
+        
+        # Karşılaştırma
+        class_names = ["Ödeme", "Rezervasyon", "Kullanıcı", "Şikayet", "Bilgi", "Teknik"]
+        comparison_df = evaluator.compare_models()
+        
+        # Özet rapor
+        evaluator.generate_summary_report(class_names)
 
 if __name__ == "__main__":
     demo_evaluation()
