@@ -30,6 +30,7 @@ from utils.text_preprocessing import TurkishTextPreprocessor
 from utils.feature_extraction import FeatureExtractor
 from models.naive_bayes import NaiveBayesClassifier
 from models.logistic_regression import LogisticRegressionClassifier
+from utils.online_learning import get_online_learning_manager
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -43,6 +44,12 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("🚀 AutoTicket Classifier API starting up...")
     load_models()
+    
+    # Online Learning Manager'ı başlat
+    global online_learning_manager
+    online_learning_manager = get_online_learning_manager()
+    logger.info("🔄 Online Learning Manager initialized")
+    
     logger.info(f"✅ {len(models)} models loaded successfully")
     logger.info("🎯 API ready to serve requests!")
     yield
@@ -138,6 +145,37 @@ class HealthResponse(BaseModel):
     uptime_seconds: float = Field(..., description="Server uptime in seconds")
     version: str = Field(..., description="API version")
 
+# Online Learning Models
+class TrainingData(BaseModel):
+    text: str = Field(..., min_length=1, max_length=5000, description="Ticket text for training")
+    category: str = Field(..., description="True category of the ticket")
+    source: Optional[str] = Field("api", description="Data source (api, manual, batch)")
+
+class BatchTrainingData(BaseModel):
+    texts: List[str] = Field(..., min_items=1, max_items=100, description="List of texts for training")
+    categories: List[str] = Field(..., min_items=1, max_items=100, description="List of corresponding categories")
+    source: Optional[str] = Field("batch", description="Data source")
+
+class OnlineLearningStats(BaseModel):
+    new_data_count: int = Field(..., description="Number of new data points since last update")
+    update_threshold: int = Field(..., description="Threshold for triggering incremental update")
+    last_retrain_time: Optional[str] = Field(None, description="Last full retrain timestamp")
+    models_loaded: List[str] = Field(..., description="Currently loaded models")
+    total_data_points: int = Field(..., description="Total data points in system")
+    retrain_history: Dict[str, int] = Field(..., description="History of different retrain types")
+    online_data_file_exists: bool = Field(..., description="Whether online data file exists")
+
+class RetrainRequest(BaseModel):
+    force: bool = Field(False, description="Force retrain regardless of schedule")
+    retrain_type: str = Field("incremental", description="Type of retrain: incremental or full")
+
+class RetrainResponse(BaseModel):
+    success: bool = Field(..., description="Whether retrain was successful")
+    message: str = Field(..., description="Status message")
+    retrain_type: str = Field(..., description="Type of retrain performed")
+    timestamp: str = Field(default_factory=lambda: datetime.now().isoformat())
+    new_data_count: int = Field(..., description="Number of new data points processed")
+
 class ErrorResponse(BaseModel):
     error: str = Field(..., description="Error message")
     detail: Optional[str] = Field(None, description="Detailed error information")
@@ -150,6 +188,7 @@ preprocessor = None
 feature_extractor = None
 tfidf_vectorizer = None
 label_encoder = None
+online_learning_manager = None
 app_start_time = time.time()
 
 # Enhanced category translations
@@ -496,7 +535,9 @@ async def not_found_handler(request, exc):
         "error": "Endpoint bulunamadı",
         "available_endpoints": [
             "/docs", "/health", "/models", "/predict", 
-            "/batch_predict", "/categories", "/stats"
+            "/batch_predict", "/categories", "/stats",
+            "/learn/add_data", "/learn/add_batch", "/learn/stats",
+            "/learn/retrain", "/learn/check_schedule", "/predict_and_learn"
         ]
     }
 
@@ -507,19 +548,259 @@ async def internal_error_handler(request, exc):
         "message": "Lütfen daha sonra tekrar deneyin"
     }
 
-if __name__ == "__main__":
-    import uvicorn
+# ===============================================
+# 🔄 ONLINE LEARNING ENDPOINTS
+# ===============================================
+
+@app.post("/learn/add_data",
+         response_model=Dict,
+         summary="🔄 Add new training data",
+         description="Add new labeled data for online learning",
+         tags=["Online Learning"])
+async def add_training_data(data: TrainingData, background_tasks: BackgroundTasks):
+    """
+    🔄 Yeni eğitim verisi ekle
     
-    print("🚀 AutoTicket Classifier API Server")
-    print("="*50)
-    print("📚 Dokümantasyon: http://localhost:8001/docs")
-    print("🔗 API: http://localhost:8001")
-    print("❤️  Sağlık: http://localhost:8001/health")
+    Online learning sistemine yeni bir labeled veri ekler.
+    Eğer yeterli veri birikirse otomatik model güncellemesi tetiklenir.
+    """
+    try:
+        if not online_learning_manager:
+            raise HTTPException(status_code=503, detail="Online learning system not initialized")
+        
+        # Kategori kontrolü
+        if data.category not in CATEGORY_MAPPING:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Invalid category. Available: {list(CATEGORY_MAPPING.keys())}"
+            )
+        
+        # Background task olarak veri ekle
+        background_tasks.add_task(
+            online_learning_manager.add_new_data,
+            data.text,
+            data.category,
+            data.source
+        )
+        
+        # Stats al
+        stats = online_learning_manager.get_learning_stats()
+        
+        return {
+            "success": True,
+            "message": "Training data added successfully",
+            "category": data.category,
+            "text_length": len(data.text),
+            "new_data_count": stats['new_data_count'],
+            "update_threshold": stats['update_threshold'],
+            "will_trigger_update": stats['new_data_count'] >= stats['update_threshold'],
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Add training data error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to add training data: {str(e)}")
+
+@app.post("/learn/add_batch",
+         response_model=Dict,
+         summary="📦 Add batch training data",
+         description="Add multiple labeled data points for training",
+         tags=["Online Learning"])
+async def add_batch_training_data(data: BatchTrainingData, background_tasks: BackgroundTasks):
+    """
+    📦 Toplu eğitim verisi ekle
     
-    uvicorn.run(
-        "api_server:app",
-        host="0.0.0.0",
-        port=8001,
-        reload=True,
-        log_level="info"
-    )
+    Birden fazla labeled veriyi bir seferde ekler.
+    """
+    try:
+        if not online_learning_manager:
+            raise HTTPException(status_code=503, detail="Online learning system not initialized")
+        
+        # Uzunluk kontrolü
+        if len(data.texts) != len(data.categories):
+            raise HTTPException(status_code=400, detail="texts and categories must have same length")
+        
+        # Kategori kontrolü
+        invalid_categories = [cat for cat in data.categories if cat not in CATEGORY_MAPPING]
+        if invalid_categories:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid categories: {invalid_categories}. Available: {list(CATEGORY_MAPPING.keys())}"
+            )
+        
+        # Background task olarak toplu veri ekle
+        background_tasks.add_task(
+            online_learning_manager.add_batch_data,
+            data.texts,
+            data.categories,
+            data.source
+        )
+        
+        return {
+            "success": True,
+            "message": f"Batch training data added successfully",
+            "batch_size": len(data.texts),
+            "categories_distribution": {cat: data.categories.count(cat) for cat in set(data.categories)},
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Add batch training data error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to add batch training data: {str(e)}")
+
+@app.get("/learn/stats",
+        response_model=OnlineLearningStats,
+        summary="📊 Get learning statistics",
+        description="Get current online learning system statistics",
+        tags=["Online Learning"])
+async def get_learning_stats():
+    """
+    📊 Online learning istatistiklerini al
+    """
+    try:
+        if not online_learning_manager:
+            raise HTTPException(status_code=503, detail="Online learning system not initialized")
+        
+        stats = online_learning_manager.get_learning_stats()
+        return OnlineLearningStats(**stats)
+        
+    except Exception as e:
+        logger.error(f"Get learning stats error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get learning stats: {str(e)}")
+
+@app.post("/learn/retrain",
+         response_model=RetrainResponse,
+         summary="🔄 Trigger model retraining",
+         description="Trigger incremental or full model retraining",
+         tags=["Online Learning"])
+async def trigger_retrain(request: RetrainRequest, background_tasks: BackgroundTasks):
+    """
+    🔄 Model yeniden eğitimini tetikle
+    
+    - incremental: Sadece yeni veri ile artımlı güncelleme
+    - full: Tüm veri ile tam yeniden eğitim
+    """
+    try:
+        if not online_learning_manager:
+            raise HTTPException(status_code=503, detail="Online learning system not initialized")
+        
+        stats_before = online_learning_manager.get_learning_stats()
+        
+        if request.retrain_type == "full":
+            # Background task olarak full retrain
+            background_tasks.add_task(
+                online_learning_manager.trigger_full_retrain,
+                request.force
+            )
+            message = "Full retrain scheduled in background"
+            
+        elif request.retrain_type == "incremental":
+            # Background task olarak incremental update
+            background_tasks.add_task(
+                online_learning_manager._trigger_incremental_update
+            )
+            message = "Incremental update scheduled in background"
+            
+        else:
+            raise HTTPException(status_code=400, detail="retrain_type must be 'incremental' or 'full'")
+        
+        return RetrainResponse(
+            success=True,
+            message=message,
+            retrain_type=request.retrain_type,
+            new_data_count=stats_before['new_data_count']
+        )
+        
+    except Exception as e:
+        logger.error(f"Trigger retrain error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to trigger retrain: {str(e)}")
+
+@app.get("/learn/check_schedule",
+        response_model=Dict,
+        summary="⏰ Check retrain schedule",
+        description="Check if scheduled retrain is due",
+        tags=["Online Learning"])
+async def check_retrain_schedule():
+    """
+    ⏰ Scheduled retrain kontrolü yap
+    """
+    try:
+        if not online_learning_manager:
+            raise HTTPException(status_code=503, detail="Online learning system not initialized")
+        
+        # Schedule check (bu sadece check yapar, retrain tetiklemez)
+        stats = online_learning_manager.get_learning_stats()
+        
+        last_retrain = stats.get('last_retrain_time')
+        if last_retrain:
+            from datetime import datetime
+            last_time = datetime.fromisoformat(last_retrain)
+            time_since_last = datetime.now() - last_time
+            hours_passed = time_since_last.total_seconds() / 3600
+            
+            retrain_schedule_hours = online_learning_manager.retrain_schedule_hours
+            is_due = hours_passed >= retrain_schedule_hours
+            remaining_hours = max(0, retrain_schedule_hours - hours_passed)
+        else:
+            is_due = True
+            remaining_hours = 0
+            hours_passed = 0
+        
+        return {
+            "is_retrain_due": is_due,
+            "hours_since_last_retrain": round(hours_passed, 2),
+            "remaining_hours_until_next": round(remaining_hours, 2),
+            "retrain_schedule_hours": online_learning_manager.retrain_schedule_hours,
+            "last_retrain_time": last_retrain,
+            "recommendation": "Schedule retrain now" if is_due else f"Wait {remaining_hours:.1f} hours"
+        }
+        
+    except Exception as e:
+        logger.error(f"Check retrain schedule error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to check retrain schedule: {str(e)}")
+
+# ===============================================
+# 🔄 ENHANCED PREDICTION WITH LEARNING
+# ===============================================
+
+@app.post("/predict_and_learn",
+         response_model=PredictionResponse,
+         summary="🎯 Predict with optional learning",
+         description="Make prediction and optionally add to training data if correct category provided",
+         tags=["Prediction", "Online Learning"])
+async def predict_and_learn(
+    ticket: TicketText,
+    true_category: Optional[str] = None,
+    background_tasks: BackgroundTasks = None
+):
+    """
+    🎯 Tahmin yap ve isteğe bağlı olarak öğren
+    
+    Eğer true_category verilirse, tahmin sonrası bu veri eğitim setine eklenir.
+    """
+    try:
+        # Normal prediction yap
+        prediction_response = await predict_ticket(ticket)
+        
+        # Eğer true_category verilmişse, öğrenme datası olarak ekle
+        if true_category and online_learning_manager:
+            if true_category in CATEGORY_MAPPING:
+                background_tasks.add_task(
+                    online_learning_manager.add_new_data,
+                    ticket.text,
+                    true_category,
+                    "predict_and_learn"
+                )
+                
+                # Response'a öğrenme bilgisi ekle
+                prediction_response.model_dump()['learning_added'] = True
+                prediction_response.model_dump()['true_category'] = true_category
+                prediction_response.model_dump()['prediction_correct'] = prediction_response.category == true_category
+            else:
+                prediction_response.model_dump()['learning_error'] = f"Invalid true_category: {true_category}"
+        
+        return prediction_response
+        
+    except Exception as e:
+        logger.error(f"Predict and learn error: {e}")
+        raise HTTPException(status_code=500, detail=f"Prediction and learning failed: {str(e)}")
