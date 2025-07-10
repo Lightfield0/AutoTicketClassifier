@@ -10,7 +10,7 @@ Bu proje, müşteri destek taleplerini otomatik olarak kategorilere ayıran **pr
 - 🎯 **Advanced Model Evaluation**: Comprehensive validation ve overfitting detection
 - 🤖 **Ensemble Learning**: Birden fazla modeli birleştirme
 - 📈 **Data Augmentation**: Otomatik veri çoğaltma ve dengeleme
-- 🚀 **Deployment Ready**: Docker, Kubernetes, production konfigürasyonları
+- 🌐 **Web Interface**: Streamlit UI ve FastAPI REST API
 
 ## 🎯 Desteklenen Kategoriler
 - 💳 **Ödeme Sorunu**: Ödeme işlemleri, fatura, ücretlendirme
@@ -23,7 +23,7 @@ Bu proje, müşteri destek taleplerini otomatik olarak kategorilere ayıran **pr
 ## 🤖 AI Modelleri & Ensemble
 1. **Naive Bayes** - Hızlı baseline model
 2. **Logistic Regression** - Linear classifier
-3. **BERT** - Transformer-based deep learning
+3. **BERT** - Transformer-based deep learning (dbmdz/bert-base-turkish-cased)
 4. **Weighted Ensemble** - Model kombinasyonu
 
 ## 🔧 Sistem Mimarisi
@@ -34,18 +34,18 @@ AutoTicketClassifier/
 │   ├── naive_bayes.py
 │   ├── logistic_regression.py
 │   ├── bert_classifier.py
-│   └── ensemble_system.py
+│   ├── ensemble_system.py
+│   └── trained/           # Eğitilmiş model dosyaları
 ├── utils/                  # Araçlar
 │   ├── text_preprocessing.py
 │   ├── feature_extraction.py
 │   ├── evaluation.py
 │   ├── monitoring.py
-│   └── deployment.py
+│   └── data_generator.py
 ├── web/                    # Web uygulaması
 │   ├── app.py             # Streamlit app
 │   └── api_server.py      # FastAPI server
 ├── monitoring/             # Production logs
-├── deployment/            # Production configs
 └── data/                  # Veri dosyaları
 ```
 
@@ -71,7 +71,7 @@ python train_models.py
 # Streamlit UI
 streamlit run web/app.py
 
-# FastAPI Server
+# FastAPI Server (alternatif)
 python -m uvicorn web.api_server:app --reload
 ```
 
@@ -79,16 +79,6 @@ python -m uvicorn web.api_server:app --reload
 ```bash
 # Monitoring dashboard
 python -c "from utils.monitoring import ProductionMonitor; m = ProductionMonitor(); print(m.health_check())"
-```
-
-### Deployment
-```bash
-# Docker deployment
-cd deployment
-./scripts/deploy.sh
-
-# Kubernetes deployment
-kubectl apply -f deployment/kubernetes/
 ```
 
 ## 🔥 Temel Kullanım
@@ -152,17 +142,17 @@ augmented_data = augmenter.augment_dataset(df)
 - ✅ Prediction logging
 - ✅ Health checks
 
-### Deployment
-- ✅ Docker containerization
-- ✅ Kubernetes manifests
-- ✅ Environment configuration
-- ✅ Automated deployment scripts
+### Web Interface
+- ✅ Streamlit interactive dashboard
+- ✅ FastAPI REST endpoints
+- ✅ Real-time predictions
+- ✅ Model comparison views
 
 ### Scalability
 - ✅ A/B testing framework
 - ✅ Model versioning
-- ✅ Load balancing ready
-- ✅ Redis caching support
+- ✅ Ensemble learning
+- ✅ Performance monitoring
 
 ## 📁 Dosya Yapısı
 
@@ -170,16 +160,20 @@ augmented_data = augmenter.augment_dataset(df)
 ├── data/                   # Veri dosyaları
 ├── models/                 # AI modelleri
 │   ├── trained/           # Eğitilmiş model dosyaları
+│   ├── naive_bayes.py     # Naive Bayes classifier
+│   ├── logistic_regression.py # Logistic Regression classifier
+│   ├── bert_classifier.py # BERT transformer model
 │   └── ensemble_system.py # Ensemble modeli
 ├── utils/                  # Yardımcı araçlar
 │   ├── monitoring.py      # Production monitoring
 │   ├── evaluation.py      # Model evaluation
-│   └── deployment.py      # Deployment araçları
+│   ├── text_preprocessing.py # Metin işleme
+│   ├── feature_extraction.py # Özellik çıkarma
+│   └── data_generator.py  # Veri üretimi
 ├── web/                    # Web uygulaması
 │   ├── app.py             # Streamlit interface
 │   └── api_server.py      # FastAPI REST API
 ├── monitoring/             # Monitoring logs & database
-├── deployment/            # Production deployment configs
 └── tests/                 # Test dosyaları
 ```
 
@@ -208,27 +202,30 @@ Production monitoring dashboard özellikleri:
 - 🚨 Automated alerting
 - 📋 Model comparison reports
 
-## 🚀 Deployment Seçenekleri
+## 🚀 Çalıştırma Seçenekleri
 
-### 1. Docker
+### 1. Streamlit UI (Varsayılan)
 ```bash
-docker build -t autoticket-classifier .
-docker run -p 5000:5000 autoticket-classifier
+streamlit run web/app.py
 ```
 
-### 2. Kubernetes
+### 2. FastAPI Server
 ```bash
-kubectl apply -f deployment/kubernetes/
+python -m uvicorn web.api_server:app --reload
 ```
 
-### 3. Cloud Ready
-- AWS ECS/EKS ready
-- Google Cloud Run ready
-- Azure Container Instances ready
+### 3. Python Script Olarak
+```python
+from web.app import TicketClassifierApp
+
+app = TicketClassifierApp()
+prediction = app.predict_ticket("Ödeme yapamıyorum")
+print(prediction)
+```
 
 ## 📞 Destek ve Katkıda Bulunma
 
-Bu proje **production-ready** durumda ve enterprise-grade production ortamında kullanıma hazır!
+Bu proje **production-ready** durumda ve enterprise-grade kullanıma hazır!
 
 ### Ana Özellikler:
 - ✅ Enhanced feature extraction
@@ -237,8 +234,9 @@ Bu proje **production-ready** durumda ve enterprise-grade production ortamında 
 - ✅ Advanced model validation
 - ✅ Ensemble learning
 - ✅ Data augmentation
-- ✅ Deployment automation
+- ✅ Turkish BERT integration
 - ✅ Real-time performance tracking
+- ✅ Web-based interactive interface
 
 ---
 🎉 **Enterprise-grade AI sistemi - Production Ready!**
