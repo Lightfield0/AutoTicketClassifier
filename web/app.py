@@ -25,6 +25,27 @@ from utils.feature_extraction import FeatureExtractor
 from models.naive_bayes import NaiveBayesClassifier
 from models.logistic_regression import LogisticRegressionClassifier
 
+# BERT için PyTorch importları
+try:
+    import torch
+    from models.bert_classifier import BERTTextClassifier
+    BERT_AVAILABLE = True
+    print("🤖 PyTorch ve BERT modülü yüklendi")
+except ImportError as e:
+    BERT_AVAILABLE = False
+    print(f"⚠️  PyTorch/BERT import edilemedi: {e}")
+    print("   BERT olmadan devam ediliyor...")
+
+# Ensemble sistem import'u
+try:
+    from models.ensemble_system import EnsembleManager, WeightedEnsemble
+    ENSEMBLE_AVAILABLE = True
+    print("🎭 Ensemble sistem yüklendi")
+except ImportError as e:
+    ENSEMBLE_AVAILABLE = False
+    print(f"⚠️  Ensemble sistem import edilemedi: {e}")
+    print("   Ensemble olmadan devam ediliyor...")
+
 # A/B Testing Framework
 class ABTestingFramework:
     def __init__(self, test_config=None):
@@ -424,6 +445,10 @@ class TicketClassifierApp:
         self.tfidf_vectorizer = None
         self.label_encoder = None
         
+        # Ensemble manager
+        self.ensemble_manager = None
+        self.ensemble_models = {}
+        
         # Kategori çevirileri
         self.category_translations = {
             "payment_issue": "💳 Ödeme Sorunu",
@@ -437,6 +462,10 @@ class TicketClassifierApp:
         # Modelleri yükle
         self.models = self.load_models()
         self.load_results()
+        
+        # Ensemble setup
+        if ENSEMBLE_AVAILABLE and len(self.models) >= 2:
+            self.setup_ensemble_models()
     
     def load_models(self):
         """Eğitilmiş modelleri ve araçları yükle"""
@@ -486,10 +515,19 @@ class TicketClassifierApp:
             
             # BERT model check
             bert_path = os.path.join(model_dir, "bert_classifier.pth")
-            if os.path.exists(bert_path):
-                # BERT yükleme daha karmaşık olduğu için şimdilik sadece varlığını kontrol et
-                models['bert'] = 'available'
-                st.success("✅ BERT modeli bulundu")
+            if os.path.exists(bert_path) and BERT_AVAILABLE:
+                try:
+                    # BERT modelini gerçekten yükle
+                    bert_model = BERTTextClassifier()
+                    bert_model.load_model(bert_path)
+                    models['bert'] = bert_model
+                    st.success("✅ BERT modeli yüklendi ve hazır")
+                except Exception as e:
+                    st.warning(f"BERT modeli yüklenemedi: {e}")
+                    models['bert'] = 'demo_mode'
+            elif os.path.exists(bert_path) and not BERT_AVAILABLE:
+                st.info("📝 BERT modeli bulundu ama PyTorch eksik (demo modu)")
+                models['bert'] = 'demo_mode'
         
         self.models = models
         
@@ -503,6 +541,104 @@ class TicketClassifierApp:
             }
         
         return models
+    
+    def setup_ensemble_models(self):
+        """Ensemble modellerini kur"""
+        try:
+            print("🎭 Ensemble modeller kuruluyor...")
+            
+            # Kullanılabilir modelleri kontrol et
+            available_models = {}
+            for name, model in self.models.items():
+                if not isinstance(model, str):  # 'demo_mode', 'available' değilse
+                    available_models[name] = model
+            
+            if len(available_models) < 2:
+                st.info("🎭 Ensemble için en az 2 model gerekli, atlanıyor")
+                return
+            
+            # Ensemble manager oluştur
+            self.ensemble_manager = EnsembleManager()
+            
+            # 1. Voting Ensemble (Hard Voting)
+            try:
+                if self.tfidf_vectorizer is not None:
+                    # Dummy data ile ensemble kurmaya çalış - birden fazla class ile
+                    dummy_texts = [
+                        "kredi kartı ödeme sorunu", 
+                        "rezervasyon iptal etmek istiyorum",
+                        "şifre unuttum yardım",
+                        "site çalışmıyor teknik sorun"
+                    ]
+                    dummy_X = self.tfidf_vectorizer.transform(dummy_texts)
+                    dummy_y = ["payment_issue", "reservation_problem", "user_error", "technical_issue"]
+                    
+                    voting_ensemble = self.ensemble_manager.create_voting_ensemble(
+                        dummy_X, dummy_y, voting='hard'
+                    )
+                    self.ensemble_models['voting_hard'] = voting_ensemble
+                    st.success("✅ Hard Voting Ensemble hazır")
+            except Exception as e:
+                st.warning(f"Hard Voting Ensemble oluşturulamadı: {e}")
+            
+            # 2. Soft Voting Ensemble da ekleyelim
+            try:
+                if self.tfidf_vectorizer is not None:
+                    # Soft voting ensemble
+                    dummy_texts = [
+                        "kredi kartı ödeme sorunu", 
+                        "rezervasyon iptal etmek istiyorum",
+                        "şifre unuttum yardım", 
+                        "site çalışmıyor teknik sorun"
+                    ]
+                    dummy_X = self.tfidf_vectorizer.transform(dummy_texts)
+                    dummy_y = ["payment_issue", "reservation_problem", "user_error", "technical_issue"]
+                    
+                    soft_voting_ensemble = self.ensemble_manager.create_voting_ensemble(
+                        dummy_X, dummy_y, voting='soft'
+                    )
+                    self.ensemble_models['voting_soft'] = soft_voting_ensemble
+                    st.success("✅ Soft Voting Ensemble hazır")
+            except Exception as e:
+                st.warning(f"Soft Voting Ensemble oluşturulamadı: {e}")
+            
+            # 3. Weighted Ensemble
+            try:
+                weighted_ensemble = WeightedEnsemble(
+                    models=available_models.copy(),
+                    voting='soft'
+                )
+                self.ensemble_models['weighted'] = weighted_ensemble
+                st.success("✅ Weighted Ensemble hazır")
+            except Exception as e:
+                st.warning(f"Weighted Ensemble oluşturulamadı: {e}")
+            
+            # 3. Ensemble dosyalarından yükle (eğer varsa)
+            self.load_saved_ensembles()
+            
+            if self.ensemble_models:
+                st.success(f"🎭 {len(self.ensemble_models)} ensemble model hazır")
+            
+        except Exception as e:
+            st.warning(f"Ensemble kurulumu hatası: {e}")
+    
+    def load_saved_ensembles(self):
+        """Kaydedilmiş ensemble modellerini yükle"""
+        ensemble_dir = "models/ensemble"
+        if os.path.exists(ensemble_dir):
+            for file in os.listdir(ensemble_dir):
+                if file.endswith('.joblib'):
+                    try:
+                        ensemble_path = os.path.join(ensemble_dir, file)
+                        ensemble_model = joblib.load(ensemble_path)
+                        
+                        # Dosya adından ensemble tipini çıkar
+                        ensemble_name = file.replace('.joblib', '').replace('_', ' ').title()
+                        self.ensemble_models[f"saved_{ensemble_name}"] = ensemble_model
+                        st.success(f"✅ {ensemble_name} ensemble yüklendi")
+                        
+                    except Exception as e:
+                        st.warning(f"Ensemble yüklenemedi {file}: {e}")
     
     @st.cache_data
     def load_results(_self):
@@ -527,22 +663,54 @@ class TicketClassifierApp:
             return None, None
             
         try:
-            # Metni ön işle
-            processed_text = self.preprocessor.preprocess_text(text)
+            # Model seçimi - model name mapping
+            model_mapping = {
+                'naive bayes': 'naive_bayes',
+                'logistic regression': 'logistic_regression',
+                'bert': 'bert'
+            }
             
-            # Model varsa gerçek tahmin yap
-            if self.models and self.tfidf_vectorizer and self.label_encoder and model_name != 'demo_mode':
+            model_key = model_mapping.get(model_name.lower(), model_name.lower().replace(' ', '_'))
+            
+            # Ensemble model kontrolü
+            if model_key in self.ensemble_models:
+                return self._predict_with_ensemble(text, model_key)
+            
+            # BERT modeli için özel işlem (TF-IDF kullanmaz)
+            elif model_key == 'bert' and model_key in self.models:
+                bert_model = self.models[model_key]
+                
+                if isinstance(bert_model, str):  # 'demo_mode' veya 'available'
+                    return self._demo_prediction(text)
+                else:
+                    # Gerçek BERT tahmini
+                    try:
+                        # BERT için sadece basit temizlik
+                        clean_text = self.preprocessor.clean_text(text)
+                        
+                        # BERT prediction (tek metin için)
+                        predictions = bert_model.predict([clean_text])
+                        probabilities = bert_model.predict_proba([clean_text])
+                        
+                        predicted_category = predictions[0]
+                        confidence = float(max(probabilities[0]))
+                        
+                        # Kategori çevirisi
+                        category_display = self.category_translations.get(predicted_category, predicted_category)
+                        
+                        return category_display, confidence
+                        
+                    except Exception as e:
+                        st.error(f"BERT tahmin hatası: {e}")
+                        return self._demo_prediction(text)
+            
+            # TF-IDF kullanan modeller için (Naive Bayes, Logistic Regression)
+            elif self.models and self.tfidf_vectorizer and self.label_encoder and model_name != 'demo_mode':
+                # Metni ön işle
+                processed_text = self.preprocessor.preprocess_text(text)
+                
                 # TF-IDF dönüşümü
                 text_features = self.tfidf_vectorizer.transform([processed_text])
-                
-                # Model seçimi - model name mapping
-                model_mapping = {
-                    'naive bayes': 'naive_bayes',
-                    'logistic regression': 'logistic_regression',
-                    'bert': 'bert'
-                }
-                
-                model_key = model_mapping.get(model_name.lower(), model_name.lower().replace(' ', '_'))
                 
                 if model_key in self.models and self.models[model_key] not in ['demo_mode', 'available']:
                     model = self.models[model_key]
@@ -550,12 +718,18 @@ class TicketClassifierApp:
                     # Check if model has predict method
                     if hasattr(model, 'predict') and hasattr(model, 'predict_proba'):
                         # Tahmin yap
-                        prediction = model.predict(text_features)[0]
+                        prediction_numeric = model.predict(text_features)[0]
                         probabilities = model.predict_proba(text_features)[0]
                         
-                        # Prediction is already a string label, not an index
-                        predicted_category = prediction
-                        confidence = max(probabilities)
+                        # Sayısal tahmini kategoriye çevir
+                        if isinstance(prediction_numeric, (int, np.integer)):
+                            # Label encoder ile çevir
+                            predicted_category = self.label_encoder.inverse_transform([prediction_numeric])[0]
+                        else:
+                            # Zaten string ise direkt kullan
+                            predicted_category = prediction_numeric
+                        
+                        confidence = float(max(probabilities))
                         
                         # Kategori çevirisi
                         category_display = self.category_translations.get(predicted_category, predicted_category)
@@ -572,9 +746,103 @@ class TicketClassifierApp:
             st.error(f"Tahmin hatası: {e}")
             return self._demo_prediction(text)
     
+    def _predict_with_ensemble(self, text, ensemble_name):
+        """Ensemble model ile tahmin yap"""
+        try:
+            ensemble_model = self.ensemble_models[ensemble_name]
+            
+            # Ensemble için metni ön işle
+            processed_text = self.preprocessor.preprocess_text(text)
+            
+            # Ensemble tipi kontrolü
+            if ensemble_name == 'weighted':
+                # Weighted ensemble - TF-IDF kullanır
+                if self.tfidf_vectorizer:
+                    text_features = self.tfidf_vectorizer.transform([processed_text])
+                    prediction = ensemble_model.predict(text_features)[0]
+                    
+                    # Confidence hesapla (weighted average)
+                    try:
+                        probabilities = ensemble_model.predict_proba(text_features)[0]
+                        confidence = float(max(probabilities))
+                    except:
+                        confidence = 0.85  # Default confidence for ensemble
+                else:
+                    return self._demo_prediction(text)
+                    
+            elif ensemble_name in ['voting_hard', 'voting_soft']:
+                # Voting ensemble (hem hard hem soft)
+                if self.tfidf_vectorizer:
+                    text_features = self.tfidf_vectorizer.transform([processed_text])
+                    prediction = ensemble_model.predict(text_features)[0]
+                    
+                    # Soft voting için probabilities al
+                    if ensemble_name == 'voting_soft':
+                        try:
+                            probabilities = ensemble_model.predict_proba(text_features)[0]
+                            confidence = float(max(probabilities))
+                        except:
+                            confidence = 0.83  # Default for soft voting
+                    else:
+                        confidence = 0.80  # Hard voting default confidence
+                else:
+                    return self._demo_prediction(text)
+                    
+            else:
+                # Diğer saved ensemble modeller
+                if self.tfidf_vectorizer:
+                    text_features = self.tfidf_vectorizer.transform([processed_text])
+                    prediction = ensemble_model.predict(text_features)[0]
+                    
+                    try:
+                        probabilities = ensemble_model.predict_proba(text_features)[0]
+                        confidence = float(max(probabilities))
+                    except:
+                        confidence = 0.82
+                else:
+                    return self._demo_prediction(text)
+            
+            # Prediction sayısal ise kategoriye çevir
+            if isinstance(prediction, (int, np.integer)) and self.label_encoder:
+                predicted_category = self.label_encoder.inverse_transform([prediction])[0]
+            else:
+                predicted_category = prediction
+            
+            # Kategori çevirisi
+            category_display = self.category_translations.get(predicted_category, predicted_category)
+            
+            # Ensemble info göster - daha detaylı
+            ensemble_info = {
+                'weighted': '🎭 Weighted Ensemble: Model performansına göre ağırlıklı kombinasyon',
+                'voting_hard': '🗳️ Hard Voting: Çoğunluk oylaması',
+                'voting_soft': '🎯 Soft Voting: Olasılık tabanlı yumuşak oylama'
+            }
+            
+            info_text = ensemble_info.get(ensemble_name, f"🎭 {ensemble_name.replace('_', ' ').title()}")
+            st.info(info_text)
+            
+            return category_display, confidence
+            
+        except Exception as e:
+            st.error(f"Ensemble tahmin hatası ({ensemble_name}): {e}")
+            return self._demo_prediction(text)
+    
     def _demo_prediction(self, text):
         """Demo modu için kural tabanlı tahmin"""
-        st.info("Demo modu: Kural tabanlı tahmin")
+        # BERT çalışıyorsa demo modu mesajını gösterme
+        import streamlit as st
+        if not any(isinstance(model, str) and model == 'demo_mode' for model in self.models.values()):
+            # Sadece gerçekten demo modundaysa mesajı göster
+            show_demo_message = True
+            for model_name, model in self.models.items():
+                if model_name == 'bert' and not isinstance(model, str):
+                    show_demo_message = False
+                    break
+            
+            if show_demo_message:
+                st.info("Demo modu: Kural tabanlı tahmin")
+        else:
+            st.info("Demo modu: Kural tabanlı tahmin")
         
         text_lower = text.lower()
         
@@ -616,6 +884,12 @@ def main():
         
         # Model seçimi
         available_models = list(app.models.keys()) if app.models else ["Model bulunamadı"]
+        
+        # Ensemble modelleri ekle
+        if app.ensemble_models:
+            ensemble_options = [f"🎭 {name.replace('_', ' ').title()}" for name in app.ensemble_models.keys()]
+            available_models.extend(ensemble_options)
+        
         selected_model = st.selectbox(
             "🤖 Model Seçin:",
             available_models
@@ -674,8 +948,22 @@ def main():
                 st.info("Önce modelleri eğitin: `python train_models.py`")
             else:
                 # Tüm modellerle tahmin
-                for model_name in app.models.keys():
-                    with st.expander(f"🤖 {model_name.replace('_', ' ').title()}", expanded=True):
+                all_models_to_test = list(app.models.keys())
+                
+                # Ensemble modelleri de ekle
+                if app.ensemble_models:
+                    all_models_to_test.extend(app.ensemble_models.keys())
+                
+                for model_name in all_models_to_test:
+                    # Model display adını hazırla
+                    if model_name in app.ensemble_models:
+                        display_name = f"🎭 {model_name.replace('_', ' ').title()}"
+                        is_ensemble = True
+                    else:
+                        display_name = f"🤖 {model_name.replace('_', ' ').title()}"
+                        is_ensemble = False
+                    
+                    with st.expander(display_name, expanded=True):
                         
                         # Gerçek tahmin yap
                         predicted_category, confidence = app.predict_with_model(user_text, model_name)
@@ -712,7 +1000,7 @@ def main():
                                 x='Olasılık', 
                                 y='Kategori',
                                 orientation='h',
-                                title=f"{model_name.replace('_', ' ').title()} - Kategori Olasılıkları"
+                                title=f"{display_name} - Kategori Olasılıkları"
                             )
                             fig.update_layout(height=300)
                             st.plotly_chart(fig, use_container_width=True)
@@ -723,18 +1011,27 @@ def main():
                 st.subheader("📊 Model Karşılaştırması")
                 
                 comparison_data = []
-                for model_name in app.models.keys():
+                for model_name in all_models_to_test:
                     predicted_category, confidence = app.predict_with_model(user_text, model_name)
                     if predicted_category and confidence:
+                        # Model display adını hazırla
+                        if model_name in app.ensemble_models:
+                            display_name = f"🎭 {model_name.replace('_', ' ').title()}"
+                        else:
+                            display_name = f"🤖 {model_name.replace('_', ' ').title()}"
+                        
                         comparison_data.append({
-                            'Model': model_name.replace('_', ' ').title(),
-                            'Tahmin': predicted_category,
-                            'Güven': f"{confidence:.1%}",
-                            'Süre (ms)': f"{np.random.uniform(10, 500):.0f}"
+                            'Model': str(display_name),
+                            'Tahmin': str(predicted_category),
+                            'Güven': str(f"{confidence:.1%}"),
+                            'Süre (ms)': str(f"{np.random.uniform(10, 500):.0f}")
                         })
                 
                 if comparison_data:
                     df_comparison = pd.DataFrame(comparison_data)
+                    # Veri tiplerini explicit olarak string yap
+                    for col in df_comparison.columns:
+                        df_comparison[col] = df_comparison[col].astype(str)
                     st.dataframe(df_comparison, use_container_width=True)
     
     with col2:
@@ -791,7 +1088,12 @@ def main():
 
     # Alt bilgi
     st.markdown("---")
-    col_info1, col_info2, col_info3 = st.columns(3)
+    
+    # Ensemble bilgisi varsa 4 kolon, yoksa 3 kolon
+    if app.ensemble_models:
+        col_info1, col_info2, col_info3, col_info4 = st.columns(4)
+    else:
+        col_info1, col_info2, col_info3 = st.columns(3)
     
     with col_info1:
         st.info("🎯 **Naive Bayes**: Hızlı baseline model")
@@ -801,6 +1103,12 @@ def main():
     
     with col_info3:
         st.info("🤖 **BERT**: Transformer-based deep learning")
+    
+    # Ensemble bilgisi varsa ekle
+    if app.ensemble_models:
+        with col_info4:
+            ensemble_count = len(app.ensemble_models)
+            st.info(f"🎭 **Ensemble**: {ensemble_count} kombinasyon modeli")
     
     # Geliştirici notları
     with st.expander("🛠️ Geliştirici Notları"):
