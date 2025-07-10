@@ -4,7 +4,7 @@
 ## 📋 Proje Açıklaması
 Bu proje, müşteri destek taleplerini otomatik olarak kategorilere ayıran **production-ready** yapay zeka sistemidir. 
 
-🚀 **Yeni Özellikler** (Improvements entegre edildi):
+🚀 **Özellikler**:
 - 🔄 **A/B Testing Framework**: Model performansını karşılaştırmalı test etme
 - 📊 **Production Monitoring**: Real-time drift detection ve performance tracking
 - 🎯 **Advanced Model Evaluation**: Comprehensive validation ve overfitting detection
@@ -24,7 +24,7 @@ Bu proje, müşteri destek taleplerini otomatik olarak kategorilere ayıran **pr
 1. **Naive Bayes** - Hızlı baseline model
 2. **Logistic Regression** - Linear classifier
 3. **BERT** - Transformer-based deep learning
-4. **Weighted Ensemble** - Model kombinasyonu (YENİ)
+4. **Weighted Ensemble** - Model kombinasyonu
 
 ## 🔧 Sistem Mimarisi
 
@@ -34,17 +34,19 @@ AutoTicketClassifier/
 │   ├── naive_bayes.py
 │   ├── logistic_regression.py
 │   ├── bert_classifier.py
-│   └── ensemble_system.py  # YENİ
+│   └── ensemble_system.py
 ├── utils/                  # Araçlar
 │   ├── text_preprocessing.py
 │   ├── feature_extraction.py
-│   ├── evaluation.py       # Enhanced
-│   ├── monitoring.py       # YENİ
-│   └── deployment.py       # YENİ
+│   ├── evaluation.py
+│   ├── monitoring.py
+│   └── deployment.py
 ├── web/                    # Web uygulaması
-│   └── app.py             # A/B testing entegreli
+│   ├── app.py             # Streamlit app
+│   └── api_server.py      # FastAPI server
 ├── monitoring/             # Production logs
-└── deployment/            # Production configs
+├── deployment/            # Production configs
+└── data/                  # Veri dosyaları
 ```
 
 ## 🚀 Hızlı Başlangıç
@@ -52,11 +54,6 @@ AutoTicketClassifier/
 ### Kurulum
 ```bash
 pip install -r requirements.txt
-```
-
-### Entegre Demo Çalıştırma
-```bash
-python integrated_demo.py
 ```
 
 ### Veri Hazırlama
@@ -69,9 +66,13 @@ python data_generator.py
 python train_models.py
 ```
 
-### Web Uygulaması (Enhanced)
+### Web Uygulaması
 ```bash
+# Streamlit UI
 streamlit run web/app.py
+
+# FastAPI Server
+python -m uvicorn web.api_server:app --reload
 ```
 
 ### Production Monitoring
@@ -90,7 +91,7 @@ cd deployment
 kubectl apply -f deployment/kubernetes/
 ```
 
-## 🔥 Yeni Özellikler
+## 🔥 Temel Kullanım
 
 ### 1. A/B Testing Framework
 ```python
@@ -172,12 +173,13 @@ augmented_data = augmenter.augment_dataset(df)
 │   └── ensemble_system.py # Ensemble modeli
 ├── utils/                  # Yardımcı araçlar
 │   ├── monitoring.py      # Production monitoring
-│   ├── evaluation.py      # Enhanced evaluation
+│   ├── evaluation.py      # Model evaluation
 │   └── deployment.py      # Deployment araçları
-├── web/                    # Web uygulaması (Enhanced)
+├── web/                    # Web uygulaması
+│   ├── app.py             # Streamlit interface
+│   └── api_server.py      # FastAPI REST API
 ├── monitoring/             # Monitoring logs & database
 ├── deployment/            # Production deployment configs
-├── notebooks/             # Jupyter notebooks
 └── tests/                 # Test dosyaları
 ```
 
@@ -226,9 +228,9 @@ kubectl apply -f deployment/kubernetes/
 
 ## 📞 Destek ve Katkıda Bulunma
 
-Bu proje artık **production-ready** durumda! Tüm improvement'lar ana sisteme entegre edilmiştir.
+Bu proje **production-ready** durumda ve enterprise-grade production ortamında kullanıma hazır!
 
-### Özellikler:
+### Ana Özellikler:
 - ✅ Enhanced feature extraction
 - ✅ Production monitoring & drift detection
 - ✅ A/B testing framework
@@ -239,4 +241,4 @@ Bu proje artık **production-ready** durumda! Tüm improvement'lar ana sisteme e
 - ✅ Real-time performance tracking
 
 ---
-🎉 **Sistem artık enterprise-grade production ortamında kullanıma hazır!**
+🎉 **Enterprise-grade AI sistemi - Production Ready!**
