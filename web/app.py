@@ -602,16 +602,22 @@ class TicketClassifierApp:
             except Exception as e:
                 st.warning(f"Soft Voting Ensemble oluşturulamadı: {e}")
             
-            # 3. Weighted Ensemble
+            # 3. Manual Weighted Ensemble (daha güvenli)
             try:
-                weighted_ensemble = WeightedEnsemble(
-                    models=available_models.copy(),
-                    voting='soft'
-                )
-                self.ensemble_models['weighted'] = weighted_ensemble
-                st.success("✅ Weighted Ensemble hazır")
+                if len(available_models) >= 2:
+                    # Manual weighted ensemble - zaten eğitilmiş modelleri kullan
+                    self.ensemble_models['manual_weighted'] = {
+                        'type': 'manual_weighted',
+                        'models': available_models.copy(),
+                        'weights': None  # Runtime'da hesaplanacak
+                    }
+                    st.success("✅ Manual Weighted Ensemble hazır")
+                else:
+                    st.warning("Weighted Ensemble için yeterli model yok")
             except Exception as e:
-                st.warning(f"Weighted Ensemble oluşturulamadı: {e}")
+                st.warning(f"Manual Weighted Ensemble oluşturulamadı: {e}")
+                import traceback
+                print(f"Manual Weighted Ensemble hatası detayı: {traceback.format_exc()}")
             
             # 3. Ensemble dosyalarından yükle (eğer varsa)
             self.load_saved_ensembles()
@@ -755,21 +761,15 @@ class TicketClassifierApp:
             processed_text = self.preprocessor.preprocess_text(text)
             
             # Ensemble tipi kontrolü
-            if ensemble_name == 'weighted':
-                # Weighted ensemble - TF-IDF kullanır
-                if self.tfidf_vectorizer:
-                    text_features = self.tfidf_vectorizer.transform([processed_text])
-                    prediction = ensemble_model.predict(text_features)[0]
-                    
-                    # Confidence hesapla (weighted average)
-                    try:
-                        probabilities = ensemble_model.predict_proba(text_features)[0]
-                        confidence = float(max(probabilities))
-                    except:
-                        confidence = 0.85  # Default confidence for ensemble
-                else:
-                    return self._demo_prediction(text)
-                    
+            if ensemble_name == 'manual_weighted':
+                # Manual weighted ensemble - basit ağırlıklı ortalama
+                return self._manual_weighted_prediction(text, processed_text, ensemble_model)
+                
+            elif ensemble_name == 'weighted':
+                # Orijinal WeightedEnsemble (deprecated)
+                st.warning("Orijinal WeightedEnsemble kullanımdan kaldırıldı, Manual Weighted kullanın")
+                return self._demo_prediction(text)
+                
             elif ensemble_name in ['voting_hard', 'voting_soft']:
                 # Voting ensemble (hem hard hem soft)
                 if self.tfidf_vectorizer:
@@ -802,7 +802,7 @@ class TicketClassifierApp:
                 else:
                     return self._demo_prediction(text)
             
-            # Prediction sayısal ise kategoriye çevir
+            # Prediction sayısal ise kategoriye çevir (voting ensembles için)
             if isinstance(prediction, (int, np.integer)) and self.label_encoder:
                 predicted_category = self.label_encoder.inverse_transform([prediction])[0]
             else:
@@ -813,7 +813,7 @@ class TicketClassifierApp:
             
             # Ensemble info göster - daha detaylı
             ensemble_info = {
-                'weighted': '🎭 Weighted Ensemble: Model performansına göre ağırlıklı kombinasyon',
+                'manual_weighted': '🎭 Manual Weighted: Eşit ağırlıklı model kombinasyonu',
                 'voting_hard': '🗳️ Hard Voting: Çoğunluk oylaması',
                 'voting_soft': '🎯 Soft Voting: Olasılık tabanlı yumuşak oylama'
             }
@@ -826,6 +826,59 @@ class TicketClassifierApp:
         except Exception as e:
             st.error(f"Ensemble tahmin hatası ({ensemble_name}): {e}")
             return self._demo_prediction(text)
+    
+    def _manual_weighted_prediction(self, original_text, processed_text, ensemble_config):
+        """Manuel ağırlıklı ensemble tahmini"""
+        try:
+            models = ensemble_config['models']
+            predictions = {}
+            confidences = {}
+            
+            # Her model ile tahmin yap
+            for model_name, model in models.items():
+                if model_name == 'bert':
+                    # BERT için özel işlem
+                    if not isinstance(model, str):
+                        try:
+                            pred = model.predict([original_text])[0]
+                            prob = model.predict_proba([original_text])[0]
+                            predictions[model_name] = pred
+                            confidences[model_name] = float(max(prob))
+                        except:
+                            continue
+                else:
+                    # TF-IDF tabanlı modeller
+                    if self.tfidf_vectorizer:
+                        try:
+                            text_features = self.tfidf_vectorizer.transform([processed_text])
+                            pred = model.predict(text_features)[0]
+                            prob = model.predict_proba(text_features)[0]
+                            
+                            # Sayısal prediction'ı kategoriye çevir
+                            if isinstance(pred, (int, np.integer)) and self.label_encoder:
+                                pred = self.label_encoder.inverse_transform([pred])[0]
+                            
+                            predictions[model_name] = pred
+                            confidences[model_name] = float(max(prob))
+                        except:
+                            continue
+            
+            if not predictions:
+                return self._demo_prediction(original_text)
+            
+            # En yüksek confidence'a sahip prediction'ı seç (basit strateji)
+            best_model = max(confidences.items(), key=lambda x: x[1])
+            best_prediction = predictions[best_model[0]]
+            average_confidence = np.mean(list(confidences.values()))
+            
+            # Kategori çevirisi
+            category_display = self.category_translations.get(best_prediction, best_prediction)
+            
+            return category_display, average_confidence
+            
+        except Exception as e:
+            st.error(f"Manual weighted prediction hatası: {e}")
+            return self._demo_prediction(original_text)
     
     def _demo_prediction(self, text):
         """Demo modu için kural tabanlı tahmin"""
